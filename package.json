@@ -1,0 +1,19 @@
+{
+  "name": "obsidian-keykeeper",
+  "version": "1.0.0",
+  "description": "obsidian keykeeper backend",
+  "main": "server.js",
+  "scripts": {
+    "start": "node js/server.js"
+  },
+  "dependencies": {
+    "express": "^4.21.0",
+    "socket.io": "^4.8.0",
+    "better-sqlite3": "^11.6.0",
+    "bcrypt": "^5.1.1",
+    "openpgp": "^6.1.1",
+    "express-session": "^1.18.0",
+    "node-fetch": "^3.3.2",
+    "socks": "^2.8.3"
+  }
+}
