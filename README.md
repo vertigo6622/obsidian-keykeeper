@@ -30,7 +30,7 @@ a cryptocurrency software licensing platform built with privacy-first principles
   - increases privacy and security of the backend
   - doesn't require tor browser
 
-## Architecture
+## architecture
 
 ```
                     ┌─────────────┐
