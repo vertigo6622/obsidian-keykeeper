@@ -15,7 +15,6 @@ function sanitizePassword(password) {
   const cleaned = password.replace(/\x00/g, '');
   if (cleaned.length < 8 || cleaned.length > 128) return null;
   return cleaned;
-  return password.substring(0, 128);
 }
 
 function sanitizeString(str, maxLength = 255) {
@@ -26,14 +25,24 @@ function sanitizeString(str, maxLength = 255) {
 function sanitizeLicenseId(id) {
   if (!id || typeof id !== 'string') return null;
   const sanitized = id.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
-  const expected = 'XXXXXXXXXXXXXXX'; // 32 chars
-  if (sanitized.length !== 32) return null;
+  if (sanitized.length !== 32 && sanitized.length !== 36) return null;
   
-  return sanitized.substring(0, 8) + '-' + 
-         sanitized.substring(8, 12) + '-' + 
-         sanitized.substring(12, 16) + '-' + 
-         sanitized.substring(16, 20) + '-' + 
-         sanitized.substring(20, 32);
+  if (sanitized.length === 32) {
+    return sanitized.substring(0, 8) + '-' + 
+           sanitized.substring(8, 12) + '-' + 
+           sanitized.substring(12, 16) + '-' + 
+           sanitized.substring(16, 20) + '-' + 
+           sanitized.substring(20, 32);
+  }
+  
+  return sanitized;
+}
+
+function sanitizeHwid(hwid) {
+  if (!hwid || typeof hwid !== 'string') return null;
+  const sanitized = hwid.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+  if (sanitized.length !== 32 && sanitized.length !== 36) return null;
+  return sanitized;
 }
 
 function sanitizeAddress(address) {
@@ -95,6 +104,7 @@ module.exports = {
   sanitizePassword,
   sanitizeString,
   sanitizeLicenseId,
+  sanitizeHwid,
   sanitizeAddress,
   isValidXMRAddress,
   isValidLTCAddress,

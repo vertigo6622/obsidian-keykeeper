@@ -10,6 +10,7 @@ const auth = require('./auth');
 const tx = require('./transactions');
 const validate = require('./validate');
 const wallet = require('./wallet');
+const packer = require('./packer-bridge');
 
 const app = express();
 const server = http.createServer(app);
@@ -21,8 +22,11 @@ const io = new Server(server, {
     origin: ALLOWED_ORIGINS,
     methods: ["GET", "POST"],
     credentials: true
-  }
+  },
+  maxHttpBufferSize: 1024 * 1024
 });
+
+const IDLE_TIMEOUT_MS = 15 * 60 * 1000;
 
 tx.setSocketIO(io);
 
@@ -38,7 +42,8 @@ const sessionMiddleware = session({
   cookie: {
     secure: true,
     httpOnly: true,
-    maxAge: 24 * 60 * 60 * 1000
+    maxAge: 24 * 60 * 60 * 1000,
+    sameSite: 'strict'
   }
 });
 
@@ -123,12 +128,16 @@ app.post('/api/logout', (req, res) => {
 
 app.post('/api/product/verify', async (req, res) => {
   try {
-    const { license_id, hwid, ip } = req.body;
-    const clientIp = ip || req.ip || req.connection.remoteAddress;
+    const { license_id, hwid_data, stub_mac, client_mac } = req.body;
+    const clientIp = req.ip || req.connection.remoteAddress;
     
-    if (!license_id || !hwid) {
+    if (!license_id || !hwid_data || !stub_mac || !client_mac) {
       auth.logProductVerification(license_id || 'unknown', clientIp, false);
-      return res.json({ valid: false, error: 'license_id and hwid required' });
+      return res.json({ valid: false, error: 'license_id, hwid_data, stub_mac, and client_mac required' });
+    }
+    
+    if (auth.isHwidVerifyRateLimited(null, clientIp)) {
+      return res.json({ valid: false, error: 'Too many verification attempts. Try again later.' });
     }
     
     const license = auth.getLicenseById(license_id);
@@ -142,9 +151,9 @@ app.post('/api/product/verify', async (req, res) => {
       return res.json({ valid: false, error: 'License expired' });
     }
     
-    if (license.license_hwid && license.license_hwid !== hwid) {
+    if (!auth.verifyHwidIntegrity(hwid_data, license.stub_mac, client_mac)) {
       auth.logProductVerification(license_id, clientIp, false);
-      return res.json({ valid: false, error: 'Hardware ID mismatch' });
+      return res.json({ valid: false, error: 'Hardware ID integrity check failed' });
     }
     
     const decryptionKey = crypto.randomBytes(32).toString('hex');
@@ -163,83 +172,39 @@ app.post('/api/product/verify', async (req, res) => {
   }
 });
 
-app.post('/api/coinbase/create-checkout', async (req, res) => {
-  try {
-    const { licenseType, userId, currency } = req.body;
-    
-    if (!licenseType || !userId) {
-      return res.json({ success: false, error: 'licenseType and userId required' });
-    }
-    
-    const COINBASE_API_KEY = process.env.COINBASE_API_KEY;
-    if (!COINBASE_API_KEY) {
-      return res.json({ success: false, error: 'Coinbase not configured' });
-    }
-    
-    let amount;
-    if (licenseType === 'pro') {
-      amount = currency === 'XMR' ? '0.15' : currency === 'LTC' ? '0.65' : '66.00';
-    } else if (licenseType === 'commercial') {
-      amount = currency === 'XMR' ? '0.50' : currency === 'LTC' ? '2.17' : '220.00';
-    }
-    
-    const cryptoCurrency = currency === 'XMR' || currency === 'LTC' ? currency : 'USD';
-    
-    const response = await fetch('https://api.commerce.coinbase.com/checkouts', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-CC-Api-Key': COINBASE_API_KEY,
-        'X-CC-Version': '2018-03-22'
-      },
-      body: JSON.stringify({
-        name: 'Obsidian ' + (licenseType === 'pro' ? 'Pro' : 'Commercial') + ' License',
-        description: '6 month ' + licenseType + ' license for Obsidian Protector',
-        pricing_type: cryptoCurrency === 'USD' ? 'fixed_price' : 'crypto_price',
-        local_price: cryptoCurrency === 'USD' ? { amount: amount, currency: 'USD' } : undefined,
-        crypto_price: cryptoCurrency === 'XMR' ? { amount: amount, currency: 'XMR' } : undefined,
-        redirect_url: (process.env.BASE_URL || 'http://localhost') + '/payment-success',
-        cancel_url: (process.env.BASE_URL || 'http://localhost') + '/payment-cancelled',
-      })
-    });
-    
-    const checkout = await response.json();
-    
-    const tx = require('./transactions');
-    const transaction = await tx.createTransaction(userId, currency, licenseType, null);
-    
-    res.json({ success: true, checkout_id: checkout.data.id, hosted_url: checkout.data.hosted_url, transaction_id: transaction.id });
-  } catch (error) {
-    console.error('Coinbase create checkout error:', error);
-    res.json({ success: false, error: 'Failed to create checkout' });
+app.post('/api/product/create', (req, res) => {
+  const userId = req.session.userId;
+  if (!userId) {
+    return res.status(401).send('Unauthorized');
   }
-});
-
-app.post('/api/coinbase/webhook', async (req, res) => {
-  try {
-    const { event } = req.body;
-    const COINBASE_WEBHOOK_SECRET = process.env.COINBASE_WEBHOOK_SECRET;
-    
-    if (!event || !event.type) {
-      return res.json({ received: true });
-    }
-    
-    if (event.type === 'charge:confirmed' || event.type === 'charge:resolved') {
-      const charge = event.data;
-      const checkoutId = charge.metadata?.checkout_id;
-      const transactionId = charge.metadata?.transaction_id;
-      
-      if (checkoutId && transactionId) {
-        const tx = require('./transactions');
-        tx.updateTransactionStatus(transactionId, charge.id, 'completed');
-      }
-    }
-    
-    res.json({ received: true });
-  } catch (error) {
-    console.error('Coinbase webhook error:', error);
-    res.status(500).json({ error: 'Webhook processing failed' });
+  
+  const { license_id } = req.body;
+  
+  if (!license_id) {
+    return res.status(400).send('license_id required');
   }
+  
+  const license = auth.getLicenseById(license_id);
+  if (!license || license.user_id !== userId) {
+    return res.status(404).send('License not found');
+  }
+  
+  const licenseType = license.type;
+  const hwid = license.license_hwid || null;
+  
+  packer.createPackedBinary(licenseType, hwid, (err, result) => {
+    if (err) {
+      console.error('Packer error:', err.message);
+      return res.status(500).send('Failed to create binary');
+    }
+    
+    auth.updateLicenseDownloadFilename(license_id, result.filename);
+    auth.updateLicenseStubMac(license_id, result.mac);
+    
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', 'attachment; filename="' + result.filename + '"');
+    res.send(result.data);
+  });
 });
 
 function isAuthenticated(req) {
@@ -248,6 +213,30 @@ function isAuthenticated(req) {
 
 io.on('connection', (socket) => {
   console.log('Client connected:', socket.id);
+  
+  let lastActivity = Date.now();
+  
+  const checkIdle = () => {
+    if (socket.request.session && socket.request.session.userId) {
+      if (Date.now() - lastActivity > IDLE_TIMEOUT_MS) {
+        console.log('Client idle timeout:', socket.id);
+        socket.emit('session:timeout', { message: 'Session expired due to inactivity' });
+        socket.request.session.destroy();
+        socket.disconnect(true);
+      }
+    }
+  };
+  
+  const idleInterval = setInterval(checkIdle, 60000);
+  
+  socket.onAny(() => {
+    lastActivity = Date.now();
+  });
+  
+  socket.on('disconnect', () => {
+    clearInterval(idleInterval);
+    console.log('Client disconnected:', socket.id);
+  });
   
   if (socket.request.session && socket.request.session.userId) {
     socket.join('user_' + socket.request.session.userId);
@@ -331,6 +320,10 @@ io.on('connection', (socket) => {
         return callback({ success: false, error: 'Account locked. Contact support.' });
       }
       
+      if (auth.isAccountSuspended(user.id)) {
+        return callback({ success: false, error: 'account suspended. contact support.' });
+      }
+      
       const valid = await auth.verifyPassword(sanitizedPassword, user.password_hash);
       if (!valid) {
         auth.addFailedLoginAttempt(user.id, ip);
@@ -380,11 +373,20 @@ io.on('connection', (socket) => {
   
   socket.on('license:verify', async (data, callback) => {
     try {
-      const { licenseId, hwid } = data;
+      const { licenseId, hwid_data, stub_mac, client_mac } = data;
+      const ip = socket.handshake.address || 'unknown';
       
       const sanitizedLicenseId = validate.sanitizeLicenseId(licenseId);
       if (!sanitizedLicenseId) {
         return callback({ valid: false, error: 'Invalid license ID format' });
+      }
+      
+      if (!hwid_data || !stub_mac || !client_mac) {
+        return callback({ valid: false, error: 'hwid_data, stub_mac, and client_mac required' });
+      }
+      
+      if (auth.isHwidVerifyRateLimited(null, ip)) {
+        return callback({ valid: false, error: 'Too many verification attempts. Try again later.' });
       }
       
       const license = auth.getLicenseById(sanitizedLicenseId);
@@ -396,9 +398,16 @@ io.on('connection', (socket) => {
         return callback({ valid: false, error: 'License expired' });
       }
       
-      if (license.license_hwid && license.license_hwid !== hwid) {
-        return callback({ valid: false, error: 'Hardware ID mismatch' });
+      if (license.stub_mac && license.stub_mac !== stub_mac) {
+        auth.suspendAccount(license.user_id);
+        return callback({ valid: false, error: 'License violated' });
       }
+      
+      if (!auth.verifyHwidIntegrity(hwid_data, license.stub_mac, client_mac)) {
+        return callback({ valid: false, error: 'Hardware ID integrity check failed' });
+      }
+      
+      auth.addHwidVerifyAttempt(null, ip);
       
       socket.request.session.userId = license.user_id;
       socket.request.session.licenseId = sanitizedLicenseId;
@@ -423,11 +432,18 @@ io.on('connection', (socket) => {
       return callback({ error: 'Not authenticated' });
     }
     
+    const ip = socket.handshake.address || 'unknown';
+    
+    if (auth.isTxCreateRateLimited(userId, ip)) {
+      return callback({ error: 'Too many transactions. Try again later.' });
+    }
+    
     try {
-      const { currency, licenseType, hwid } = data;
+      const { currency, licenseType, hwid, stub_mac } = data;
       
       const sanitizedCurrency = validate.sanitizeCurrency(currency);
       const sanitizedLicenseType = validate.sanitizeLicenseType(licenseType);
+      const sanitizedStubMac = validate.sanitizeString(stub_mac, 64);
       
       if (!sanitizedCurrency) {
         return callback({ error: 'Invalid currency' });
@@ -437,10 +453,46 @@ io.on('connection', (socket) => {
         return callback({ error: 'Invalid license type' });
       }
       
-      const transaction = await tx.createTransaction(userId, sanitizedCurrency, sanitizedLicenseType, hwid);
+      const transaction = await tx.createTransaction(userId, sanitizedCurrency, sanitizedLicenseType, hwid, sanitizedStubMac);
+      auth.addTxCreateAttempt(userId, ip);
       callback({ success: true, ...transaction });
     } catch (error) {
       console.error('Create tx error:', error);
+      callback({ error: error.message });
+    }
+  });
+
+  socket.on('tx:deposit', async (data, callback) => {
+    const userId = socket.request.session.userId;
+    if (!userId) {
+      return callback({ error: 'Not authenticated' });
+    }
+    
+    const ip = socket.handshake.address || 'unknown';
+    
+    if (auth.isTxCreateRateLimited(userId, ip)) {
+      return callback({ error: 'Too many transactions. Try again later.' });
+    }
+    
+    try {
+      const { currency, amount } = data;
+      
+      const sanitizedCurrency = validate.sanitizeCurrency(currency);
+      const sanitizedAmount = validate.sanitizeAmount(amount);
+      
+      if (!sanitizedCurrency) {
+        return callback({ error: 'Invalid currency' });
+      }
+      
+      if (!sanitizedAmount || sanitizedAmount <= 0) {
+        return callback({ error: 'Invalid amount' });
+      }
+      
+      const transaction = await tx.createDepositTransaction(userId, sanitizedCurrency, sanitizedAmount);
+      auth.addTxCreateAttempt(userId, ip);
+      callback({ success: true, ...transaction });
+    } catch (error) {
+      console.error('Create deposit error:', error);
       callback({ error: error.message });
     }
   });
@@ -732,10 +784,6 @@ callback({ canRelink: auth.canRelink(sanitizedLicenseId) });
     db.prepare('DELETE FROM sessions WHERE user_id = ?').run(userId);
     callback({ success: true });
   });
-   
-  socket.on('disconnect', () => {
-    console.log('Client disconnected:', socket.id);
-  });
 });
 
 const dataDir = path.join(__dirname, 'data');
@@ -757,7 +805,7 @@ app.get('/api/downloads/:filename', (req, res) => {
   }
   
   const filename = req.params.filename;
-  const validFiles = ['obsidian-pro.exe', 'obsidian-commercial.exe'];
+  const validFiles = ['obsidian-ce.exe'];
   if (!validFiles.includes(filename)) {
     return res.send();
   }
@@ -799,4 +847,14 @@ server.listen(PORT, '127.0.0.1', () => {
   setInterval(() => {
     tx.cleanupOldXMRTransactions();
   }, 24 * 60 * 60 * 1000);
+  
+  auth.cleanupOldTxCreateRateLimits();
+  setInterval(() => {
+    auth.cleanupOldTxCreateRateLimits();
+  }, 60 * 60 * 1000);
+  
+  auth.cleanupOldHwidVerifyRateLimits();
+  setInterval(() => {
+    auth.cleanupOldHwidVerifyRateLimits();
+  }, 60 * 60 * 1000);
 });

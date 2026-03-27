@@ -1,6 +1,7 @@
 const db = require('./database');
 const bcrypt = require('bcrypt');
 const crypto = require('crypto');
+const validate = require('./validate');
 
 const RATE_LIMIT_HOURS = 1;
 const LOGIN_RATE_LIMIT = 30;
@@ -117,7 +118,7 @@ function generateAccountNumber() {
 }
 
 function generateLicenseId() {
-  const bytes = crypto.randomBytes(16);
+  const bytes = crypto.randomBytes(32);
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
   
   const getChunk = (offset, len) => {
@@ -205,6 +206,17 @@ function unlockAccount(userId) {
   clearFailedLoginAttempts(userId);
 }
 
+function isAccountSuspended(userId) {
+  const stmt = db.prepare(`SELECT suspended FROM users WHERE id = ?`);
+  const user = stmt.get(userId);
+  return user && user.suspended === 1;
+}
+
+function suspendAccount(userId) {
+  const stmt = db.prepare(`UPDATE users SET suspended = 1 WHERE id = ?`);
+  stmt.run(userId);
+}
+
 async function hashPassword(password) {
   return bcrypt.hash(password, 10);
 }
@@ -214,8 +226,10 @@ async function verifyPassword(password, hash) {
 }
 
 function getUserByEmail(email) {
+  const sanitizedEmail = validate.sanitizeEmail(email);
+  if (!sanitizedEmail) return null;
   const stmt = db.prepare(`SELECT * FROM users WHERE email = ?`);
-  return stmt.get(email);
+  return stmt.get(sanitizedEmail);
 }
 
 function getUserById(id) {
@@ -250,7 +264,7 @@ function getLicenseByUserId(userId) {
 
 function getLicenseById(licenseId) {
   const stmt = db.prepare(`
-    SELECT l.license_id, l.type, l.expires_at, l.user_id, l.hwid as license_hwid, u.email, u.account_number, u.hwid as user_hwid
+    SELECT l.license_id, l.type, l.expires_at, l.user_id, l.hwid as license_hwid, l.stub_mac, u.email, u.account_number, u.hwid as user_hwid, u.speck_key
     FROM licenses l
     JOIN users u ON l.user_id = u.id
     WHERE l.license_id = ?
@@ -258,13 +272,13 @@ function getLicenseById(licenseId) {
   return stmt.get(licenseId);
 }
 
-function createLicense(userId, type, hwid) {
+function createLicense(userId, type, hwid, stubMac) {
   const licenseId = generateLicenseId();
   const stmt = db.prepare(`
-    INSERT INTO licenses (license_id, user_id, type, hwid, expires_at)
-    VALUES (?, ?, ?, ?, datetime('now', '+6 months'))
+    INSERT INTO licenses (license_id, user_id, type, hwid, stub_mac, expires_at)
+    VALUES (?, ?, ?, ?, ?, datetime('now', '+6 months'))
   `);
-  stmt.run(licenseId, userId, type, hwid);
+  stmt.run(licenseId, userId, type, hwid, stubMac);
   return licenseId;
 }
 
@@ -291,6 +305,16 @@ function relinkLicense(licenseId, newHwid) {
   `);
   stmt.run(newHwid, licenseId);
   return { success: true };
+}
+
+function updateLicenseDownloadFilename(licenseId, filename) {
+  const stmt = db.prepare(`UPDATE licenses SET download_filename = ? WHERE license_id = ?`);
+  stmt.run(filename, licenseId);
+}
+
+function updateLicenseStubMac(licenseId, stubMac) {
+  const stmt = db.prepare(`UPDATE licenses SET stub_mac = ? WHERE license_id = ?`);
+  stmt.run(stubMac, licenseId);
 }
 
 function logProductVerification(licenseId, ip, success) {
@@ -458,7 +482,17 @@ module.exports = {
   computeHwidFromMachineInfo,
   getUserByLicenseId,
   isRelinkRateLimited,
-  addRelinkAttempt
+  addRelinkAttempt,
+  updateLicenseDownloadFilename,
+  updateLicenseStubMac,
+  isTxCreateRateLimited,
+  addTxCreateAttempt,
+  cleanupOldTxCreateRateLimits,
+  isAccountSuspended,
+  suspendAccount,
+  isHwidVerifyRateLimited,
+  addHwidVerifyAttempt,
+  cleanupOldHwidVerifyRateLimits
 };
 
 const RELINK_RATE_LIMIT = 10;
@@ -475,4 +509,44 @@ function isRelinkRateLimited(ip) {
 function addRelinkAttempt(ip) {
   const stmt = db.prepare(`INSERT INTO relink_rate_limit (ip) VALUES (?)`);
   stmt.run(ip);
+}
+
+const TX_CREATE_RATE_LIMIT = 10;
+
+function isTxCreateRateLimited(userId, ip) {
+  const stmt = db.prepare(`
+    SELECT COUNT(*) as count FROM tx_create_rate_limit 
+    WHERE (user_id = ? OR ip = ?) AND attempted_at > datetime('now', '-1 hour')
+  `);
+  const result = stmt.get(userId, ip);
+  return result.count >= TX_CREATE_RATE_LIMIT;
+}
+
+function addTxCreateAttempt(userId, ip) {
+  const stmt = db.prepare(`INSERT INTO tx_create_rate_limit (user_id, ip) VALUES (?, ?)`);
+  stmt.run(userId, ip);
+}
+
+function cleanupOldTxCreateRateLimits() {
+  db.prepare(`DELETE FROM tx_create_rate_limit WHERE attempted_at < datetime('now', '-1 hour')`).run();
+}
+
+const HWID_VERIFY_RATE_LIMIT = 100;
+
+function isHwidVerifyRateLimited(userId, ip) {
+  const stmt = db.prepare(`
+    SELECT COUNT(*) as count FROM hwid_verify_rate_limit 
+    WHERE (user_id = ? OR ip = ?) AND attempted_at > datetime('now', '-1 hour')
+  `);
+  const result = stmt.get(userId, ip);
+  return result.count >= HWID_VERIFY_RATE_LIMIT;
+}
+
+function addHwidVerifyAttempt(userId, ip) {
+  const stmt = db.prepare(`INSERT INTO hwid_verify_rate_limit (user_id, ip) VALUES (?, ?)`);
+  stmt.run(userId, ip);
+}
+
+function cleanupOldHwidVerifyRateLimits() {
+  db.prepare(`DELETE FROM hwid_verify_rate_limit WHERE attempted_at < datetime('now', '-1 hour')`).run();
 }

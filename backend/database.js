@@ -17,7 +17,8 @@ db.exec(`
     notifications_enabled INTEGER DEFAULT 1,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     last_login DATETIME,
-    locked_at DATETIME
+    locked_at DATETIME,
+    suspended INTEGER DEFAULT 0
   );
 
   CREATE TABLE IF NOT EXISTS licenses (
@@ -26,6 +27,8 @@ db.exec(`
     user_id INTEGER REFERENCES users(id),
     type TEXT NOT NULL,
     hwid TEXT,
+    stub_mac TEXT,
+    download_filename TEXT,
     expires_at DATETIME,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     last_relink_at DATETIME
@@ -45,6 +48,7 @@ db.exec(`
     metadata TEXT,
     license_type TEXT,
     hwid TEXT,
+    stub_mac TEXT,
     detected_at DATETIME,
     confirmations INTEGER DEFAULT 0,
     expires_at DATETIME,
@@ -77,6 +81,13 @@ db.exec(`
     attempted_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
+  CREATE TABLE IF NOT EXISTS tx_create_rate_limit (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER,
+    ip TEXT NOT NULL,
+    attempted_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
   CREATE TABLE IF NOT EXISTS sessions (
     sid TEXT PRIMARY KEY,
     sess TEXT NOT NULL,
@@ -103,6 +114,13 @@ db.exec(`
     active INTEGER DEFAULT 1,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     last_used_at DATETIME
+  );
+
+  CREATE TABLE IF NOT EXISTS hwid_verify_rate_limit (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER,
+    ip TEXT NOT NULL,
+    attempted_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 `);
 

@@ -20,6 +20,11 @@ async function getExchangeRates() {
     }
     
     const response = await fetch(url);
+
+    if (!response.ok) {
+      console.error('CoinGecko error:', response.status, await response.text());
+      throw new Error('CoinGecko API error');
+    }
     const data = await response.json();
     
     cachedRates = {

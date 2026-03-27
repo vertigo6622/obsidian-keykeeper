@@ -4,15 +4,18 @@ const pgp = require('./pgp');
 const auth = require('./auth');
 const crypto = require('crypto');
 
-const PRICES_USD = {
-  pro: 60,
-  commercial: 200
+const PRICES_USD_CENTS = {
+  pro: 6000,
+  commercial: 20000
 };
 
 const TOLERANCE = {
-  XMR: 0.000001,
-  LTC: 0.000001
+  XMR: 1,
+  LTC: 1
 };
+
+const PICONERO_PER_XMR = BigInt(1e12);
+const SATOSHIS_PER_LTC = BigInt(1e8);
 
 let io = null;
 
@@ -24,7 +27,14 @@ function generateTransactionId() {
   return crypto.randomBytes(5).toString('hex').toUpperCase();
 }
 
-async function createTransaction(userId, currency, licenseType, hwid) {
+function formatAmount(amount, currency) {
+  if (currency === 'XMR') {
+    return (Number(amount) / 1e6).toFixed(6);
+  }
+  return (Number(amount) / 1e2).toFixed(8);
+}
+
+async function createTransaction(userId, currency, licenseType, hwid, stubMac = null) {
   try {
     let address;
     
@@ -43,24 +53,32 @@ async function createTransaction(userId, currency, licenseType, hwid) {
       throw new Error('Exchange rates unavailable');
     }
     
-    const usdPrice = PRICES_USD[licenseType];
+    const usdPriceCents = PRICES_USD_CENTS[licenseType];
     const rate = currency === 'XMR' ? rates.xmr : rates.ltc;
-    const amount = usdPrice / rate;
-    const amountRounded = Math.round(amount * 1e6) / 1e6;
     
-    const signedAddress = await pgp.signAddress(address, amountRounded, currency, usdPrice);
+    let amountUnits;
+    if (currency === 'XMR') {
+      const amountXMR = usdPriceCents / rate;
+      amountUnits = BigInt(Math.round(amountXMR * 1e6));
+    } else {
+      const amountLTC = usdPriceCents / rate;
+      amountUnits = BigInt(Math.round(amountLTC * 1e2));
+    }
+    
+    const amountDisplay = formatAmount(amountUnits, currency);
+    const signedAddress = await pgp.signAddress(address, parseFloat(amountDisplay), currency, usdPriceCents / 100);
     
     const stmt = db.prepare(`
-      INSERT INTO transactions (user_id, type, currency, amount, address, signed_address, status, license_type, hwid, expires_at, usd_amount)
-      VALUES (?, 'purchase', ?, ?, ?, ?, 'pending', ?, ?, datetime('now', '+24 hours'), ?)
+      INSERT INTO transactions (user_id, type, currency, amount, address, signed_address, status, license_type, hwid, stub_mac, expires_at, usd_amount)
+      VALUES (?, 'purchase', ?, ?, ?, ?, 'pending', ?, ?, ?, datetime('now', '+24 hours'), ?)
     `);
-    const txResult = stmt.run(userId, currency, amountRounded, address, signedAddress, licenseType, hwid, usdPrice);
+    const txResult = stmt.run(userId, currency, amountDisplay, address, signedAddress, licenseType, hwid, stubMac, usdPriceCents / 100);
     
     return {
       id: txResult.lastInsertRowid,
       address,
       signed_address: signedAddress,
-      amount: amountRounded,
+      amount: amountDisplay,
       currency,
       tx_id: generateTransactionId(),
       status: 'pending'
@@ -80,7 +98,7 @@ async function activateLicense(transactionId) {
       return { success: false, error: 'Transaction not found or already processed' };
     }
     
-    const licenseId = auth.createLicense(transaction.user_id, transaction.license_type, transaction.hwid);
+    const licenseId = auth.createLicense(transaction.user_id, transaction.license_type, transaction.hwid, transaction.stub_mac);
     
     const updateStmt = db.prepare('UPDATE transactions SET status = ?, license_id = ? WHERE id = ?');
     updateStmt.run('completed', licenseId, transactionId);
@@ -98,6 +116,63 @@ async function activateLicense(transactionId) {
   } catch (error) {
     console.error('Activate license error:', error);
     return { success: false, error: 'Failed to activate license' };
+  }
+}
+
+async function createDepositTransaction(userId, currency, amount) {
+  try {
+    let address;
+    
+    if (currency === 'XMR') {
+      const result = await wallet.generateXMRAddress();
+      address = result.address;
+    } else if (currency === 'LTC') {
+      const result = await wallet.generateLTCAddress();
+      address = result.address;
+    } else {
+      throw new Error('Unsupported currency');
+    }
+    
+    const rates = await wallet.getExchangeRates();
+    if (!rates.available) {
+      throw new Error('Exchange rates unavailable');
+    }
+    
+    const rate = currency === 'XMR' ? rates.xmr : rates.ltc;
+    
+    let amountUnits;
+    let usdAmountCents;
+    if (currency === 'XMR') {
+      amountUnits = BigInt(Math.round(amount * 1e6));
+      usdAmountCents = BigInt(Math.round(amount * rate * 100));
+    } else {
+      amountUnits = BigInt(Math.round(amount * 1e2));
+      usdAmountCents = BigInt(Math.round(amount * rate * 100));
+    }
+    
+    const amountDisplay = formatAmount(amountUnits, currency);
+    const usdDisplay = (Number(usdAmountCents) / 100).toFixed(2);
+    
+    const signedAddress = await pgp.signAddress(address, parseFloat(amountDisplay), currency, parseFloat(usdDisplay));
+    
+    const stmt = db.prepare(`
+      INSERT INTO transactions (user_id, type, currency, amount, address, signed_address, status, expires_at, usd_amount)
+      VALUES (?, 'deposit', ?, ?, ?, ?, 'pending', datetime('now', '+24 hours'), ?)
+    `);
+    const txResult = stmt.run(userId, currency, amountDisplay, address, signedAddress, usdDisplay);
+    
+    return {
+      id: txResult.lastInsertRowid,
+      address,
+      signed_address: signedAddress,
+      amount: amountDisplay,
+      currency,
+      tx_id: generateTransactionId(),
+      status: 'pending'
+    };
+  } catch (error) {
+    console.error('Create deposit error:', error);
+    throw new Error('Failed to create deposit');
   }
 }
 
@@ -131,13 +206,13 @@ function getTransactionById(id) {
 
 function getUserBalance(userId) {
   const purchases = db.prepare(`
-    SELECT currency, SUM(amount) as total FROM transactions
+    SELECT currency, SUM(CAST(amount AS REAL)) as total FROM transactions
     WHERE user_id = ? AND type = 'purchase' AND status = 'completed'
     GROUP BY currency
   `).all(userId);
   
   const withdrawals = db.prepare(`
-    SELECT currency, SUM(amount) as total FROM transactions
+    SELECT currency, SUM(CAST(amount AS REAL)) as total FROM transactions
     WHERE user_id = ? AND type = 'withdraw' AND status = 'completed'
     GROUP BY currency
   `).all(userId);
@@ -146,13 +221,13 @@ function getUserBalance(userId) {
   let ltcBalance = 0;
   
   purchases.forEach(p => {
-    if (p.currency === 'XMR') xmrBalance += p.total;
-    if (p.currency === 'LTC') ltcBalance += p.total;
+    if (p.currency === 'XMR') xmrBalance += p.total || 0;
+    if (p.currency === 'LTC') ltcBalance += p.total || 0;
   });
   
   withdrawals.forEach(w => {
-    if (w.currency === 'XMR') xmrBalance -= w.total;
-    if (w.currency === 'LTC') ltcBalance -= w.total;
+    if (w.currency === 'XMR') xmrBalance -= w.total || 0;
+    if (w.currency === 'LTC') ltcBalance -= w.total || 0;
   });
   
   return {
@@ -202,15 +277,19 @@ async function checkPendingPayments() {
         if (tx.currency === 'XMR') {
           const balance = await wallet.getXMRBalanceByAddress(tx.address);
           console.log('XMR check:', tx.address, 'balance:', balance, 'needed:', tx.amount);
-          const tolerance = TOLERANCE.XMR;
-          if (balance >= tx.amount - tolerance && balance <= tx.amount + tolerance * 10) {
+          const balancePiconero = BigInt(Math.round(balance * 1e6));
+          const neededPiconero = BigInt(Math.round(parseFloat(tx.amount) * 1e6));
+          const tolerance = BigInt(TOLERANCE.XMR);
+          if (balancePiconero >= neededPiconero - tolerance && balancePiconero <= neededPiconero + tolerance * 10n) {
             confirmed = true;
           }
         } else if (tx.currency === 'LTC') {
           const balance = await wallet.getLTCBalanceByAddress(tx.address);
           console.log('LTC check:', tx.address, 'balance:', balance, 'needed:', tx.amount);
-          const tolerance = TOLERANCE.LTC;
-          if (balance >= tx.amount - tolerance && balance <= tx.amount + tolerance * 10) {
+          const balanceSatoshis = BigInt(Math.round(balance * 1e2));
+          const neededSatoshis = BigInt(Math.round(parseFloat(tx.amount) * 1e2));
+          const tolerance = BigInt(TOLERANCE.LTC);
+          if (balanceSatoshis >= neededSatoshis - tolerance && balanceSatoshis <= neededSatoshis + tolerance * 10n) {
             confirmed = true;
           }
         }
@@ -275,6 +354,7 @@ function cleanupOldXMRTransactions() {
 module.exports = {
   setSocketIO,
   createTransaction,
+  createDepositTransaction,
   createWithdrawTransaction,
   getTransactionsByUserId,
   getTransactionById,
