@@ -66,10 +66,23 @@ function createPackedBinary(licenseType, hwid, callback) {
       return callback(new Error('Packer exited with code ' + code + ': ' + stderr));
     }
     
-    const mac = stdout.trim();
+    let packerOutput;
+    try {
+      packerOutput = JSON.parse(stdout.trim());
+    } catch (e) {
+      return callback(new Error('Invalid JSON output from packer: ' + stdout));
+    }
+    
+    const mac = packerOutput.mac;
+    const key = packerOutput.key;
+    const computedHwid = packerOutput.hwid;
+    
     if (!mac || mac.length !== 32) {
-      fs.unlink(outputPath, () => {});
-      return callback(new Error('Invalid MAC output: ' + stdout));
+      return callback(new Error('Invalid MAC in packer output'));
+    }
+    
+    if (!key || key.length !== 32) {
+      return callback(new Error('Invalid key in packer output'));
     }
     
     if (!fs.existsSync(outputPath)) {
@@ -84,6 +97,8 @@ function createPackedBinary(licenseType, hwid, callback) {
     
     callback(null, {
       mac: mac,
+      key: key,
+      hwid: computedHwid || null,
       filename: zipName,
       data: zipBuffer
     });

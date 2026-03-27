@@ -317,6 +317,11 @@ function updateLicenseStubMac(licenseId, stubMac) {
   stmt.run(stubMac, licenseId);
 }
 
+function updateLicenseHwid(licenseId, hwid) {
+  const stmt = db.prepare(`UPDATE licenses SET hwid = ? WHERE license_id = ?`);
+  stmt.run(hwid, licenseId);
+}
+
 function logProductVerification(licenseId, ip, success) {
   const stmt = db.prepare(`
     INSERT INTO product_verifications (license_id, ip, success) VALUES (?, ?, ?)
@@ -396,6 +401,11 @@ function generateSpeckKey(userId) {
   const stmt = db.prepare(`UPDATE users SET speck_key = ? WHERE id = ?`);
   stmt.run(key, userId);
   return key;
+}
+
+function updateUserSpeckKey(userId, key) {
+  const stmt = db.prepare(`UPDATE users SET speck_key = ? WHERE id = ?`);
+  stmt.run(key, userId);
 }
 
 function getOrCreateSpeckKey(userId) {
@@ -478,6 +488,7 @@ module.exports = {
   verifyHwidIntegrity,
   getSpeckKey,
   generateSpeckKey,
+  updateUserSpeckKey,
   getOrCreateSpeckKey,
   computeHwidFromMachineInfo,
   getUserByLicenseId,
@@ -485,6 +496,7 @@ module.exports = {
   addRelinkAttempt,
   updateLicenseDownloadFilename,
   updateLicenseStubMac,
+  updateLicenseHwid,
   isTxCreateRateLimited,
   addTxCreateAttempt,
   cleanupOldTxCreateRateLimits,

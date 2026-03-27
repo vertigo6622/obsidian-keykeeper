@@ -201,6 +201,14 @@ app.post('/api/product/create', (req, res) => {
     auth.updateLicenseDownloadFilename(license_id, result.filename);
     auth.updateLicenseStubMac(license_id, result.mac);
     
+    if (result.key) {
+      auth.updateUserSpeckKey(userId, result.key);
+    }
+    
+    if (result.hwid) {
+      auth.updateLicenseHwid(license_id, result.hwid);
+    }
+    
     res.setHeader('Content-Type', 'application/zip');
     res.setHeader('Content-Disposition', 'attachment; filename="' + result.filename + '"');
     res.send(result.data);
