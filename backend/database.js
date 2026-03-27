@@ -28,6 +28,7 @@ db.exec(`
     type TEXT NOT NULL,
     hwid TEXT,
     stub_mac TEXT,
+    integrity TEXT,
     download_filename TEXT,
     expires_at DATETIME,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,

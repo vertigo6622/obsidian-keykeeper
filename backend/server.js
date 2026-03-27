@@ -128,43 +128,35 @@ app.post('/api/logout', (req, res) => {
 
 app.post('/api/product/verify', async (req, res) => {
   try {
-    const { license_id, hwid_data, stub_mac, client_mac } = req.body;
+    const { license, sum, cpu, disk, mac, ram } = req.body;
     const clientIp = req.ip || req.connection.remoteAddress;
     
-    if (!license_id || !hwid_data || !stub_mac || !client_mac) {
-      auth.logProductVerification(license_id || 'unknown', clientIp, false);
-      return res.json({ valid: false, error: 'license_id, hwid_data, stub_mac, and client_mac required' });
+    if (!license || !sum || !cpu || !disk || !mac || !ram) {
+      auth.logProductVerification(license || 'unknown', clientIp, false);
+      return res.json({ valid: false, error: 'license, sum, cpu, disk, mac, and ram required' });
     }
     
     if (auth.isHwidVerifyRateLimited(null, clientIp)) {
       return res.json({ valid: false, error: 'Too many verification attempts. Try again later.' });
     }
     
-    const license = auth.getLicenseById(license_id);
-    if (!license) {
-      auth.logProductVerification(license_id, clientIp, false);
-      return res.json({ valid: false, error: 'License not found' });
-    }
-    
-    if (new Date(license.expires_at) < new Date()) {
-      auth.logProductVerification(license_id, clientIp, false);
-      return res.json({ valid: false, error: 'License expired' });
-    }
-    
-    if (!auth.verifyHwidIntegrity(hwid_data, license.stub_mac, client_mac)) {
-      auth.logProductVerification(license_id, clientIp, false);
-      return res.json({ valid: false, error: 'Hardware ID integrity check failed' });
-    }
-    
-    const decryptionKey = crypto.randomBytes(32).toString('hex');
-    
-    auth.logProductVerification(license_id, clientIp, true);
-    
-    res.json({
-      valid: true,
-      type: license.type,
-      decryption_key: decryptionKey,
-      expires_at: license.expires_at
+    auth.verifyHwidIntegrity(license, sum, cpu, disk, mac, ram, (result) => {
+      if (!result.valid) {
+        auth.logProductVerification(license, clientIp, false);
+        return res.json(result);
+      }
+      
+      const licenseData = auth.getLicenseById(license);
+      const decryptionKey = crypto.randomBytes(32).toString('hex');
+      
+      auth.logProductVerification(license, clientIp, true);
+      
+      res.json({
+        valid: true,
+        type: result.type,
+        decryption_key: decryptionKey,
+        expires_at: licenseData.expires_at
+      });
     });
   } catch (error) {
     console.error('Product verify error:', error);
@@ -207,6 +199,10 @@ app.post('/api/product/create', (req, res) => {
     
     if (result.hwid) {
       auth.updateLicenseHwid(license_id, result.hwid);
+    }
+    
+    if (result.integrity) {
+      auth.updateLicenseIntegrity(license_id, result.integrity);
     }
     
     res.setHeader('Content-Type', 'application/zip');
@@ -381,7 +377,7 @@ io.on('connection', (socket) => {
   
   socket.on('license:verify', async (data, callback) => {
     try {
-      const { licenseId, hwid_data, stub_mac, client_mac } = data;
+      const { licenseId, sum, cpu, disk, mac, ram } = data;
       const ip = socket.handshake.address || 'unknown';
       
       const sanitizedLicenseId = validate.sanitizeLicenseId(licenseId);
@@ -389,44 +385,42 @@ io.on('connection', (socket) => {
         return callback({ valid: false, error: 'Invalid license ID format' });
       }
       
-      if (!hwid_data || !stub_mac || !client_mac) {
-        return callback({ valid: false, error: 'hwid_data, stub_mac, and client_mac required' });
+      if (!sum || !cpu || !disk || !mac || !ram) {
+        return callback({ valid: false, error: 'sum, cpu, disk, mac, and ram required' });
       }
       
       if (auth.isHwidVerifyRateLimited(null, ip)) {
         return callback({ valid: false, error: 'Too many verification attempts. Try again later.' });
       }
       
-      const license = auth.getLicenseById(sanitizedLicenseId);
-      if (!license) {
-        return callback({ valid: false, error: 'License not found' });
-      }
-      
-      if (new Date(license.expires_at) < new Date()) {
-        return callback({ valid: false, error: 'License expired' });
-      }
-      
-      if (license.stub_mac && license.stub_mac !== stub_mac) {
-        auth.suspendAccount(license.user_id);
-        return callback({ valid: false, error: 'License violated' });
-      }
-      
-      if (!auth.verifyHwidIntegrity(hwid_data, license.stub_mac, client_mac)) {
-        return callback({ valid: false, error: 'Hardware ID integrity check failed' });
-      }
-      
-      auth.addHwidVerifyAttempt(null, ip);
-      
-      socket.request.session.userId = license.user_id;
-      socket.request.session.licenseId = sanitizedLicenseId;
-      socket.request.session.save();
-      
-      callback({
-        valid: true,
-        type: license.type,
-        email: license.email,
-        account_number: license.account_number,
-        hwid: license.license_hwid
+      auth.verifyHwidIntegrity(sanitizedLicenseId, sum, cpu, disk, mac, ram, (result) => {
+        if (!result.valid) {
+          return callback(result);
+        }
+        
+        const license = auth.getLicenseById(sanitizedLicenseId);
+        
+        if (license.stub_mac) {
+          const clientStubMac = data.stub_mac || '';
+          if (clientStubMac && license.stub_mac !== clientStubMac) {
+            auth.suspendAccount(license.user_id);
+            return callback({ valid: false, error: 'License violated' });
+          }
+        }
+        
+        auth.addHwidVerifyAttempt(null, ip);
+        
+        socket.request.session.userId = license.user_id;
+        socket.request.session.licenseId = sanitizedLicenseId;
+        socket.request.session.save();
+        
+        callback({
+          valid: true,
+          type: result.type,
+          email: license.email,
+          account_number: license.account_number,
+          hwid: license.license_hwid
+        });
       });
     } catch (error) {
       console.error('License verify error:', error);
@@ -607,7 +601,7 @@ io.on('connection', (socket) => {
       return callback({ error: 'Can only relink once per month' });
     }
     
-    const speckKey = auth.getOrCreateSpeckKey(userId);
+    const speckKey = auth.getSpeckKey(userId);
     
     callback({
       success: true,
@@ -652,12 +646,7 @@ io.on('connection', (socket) => {
       ram_serial: validate.sanitizeString(machineInfo.ram_serial, 256) || ''
     };
     
-    const speckKey = auth.getSpeckKey(userId);
-    if (!speckKey) {
-      return callback({ error: 'Speck key not found. Run initRelink from authenticated session first.' });
-    }
-    
-    const computedHwid = auth.computeHwidFromMachineInfo(sanitizedMachineInfo, speckKey);
+    const computedHwid = auth.computeHwidFromMachineInfo(sanitizedMachineInfo, license);
     if (!computedHwid) {
       return callback({ error: 'Failed to compute HWID' });
     }

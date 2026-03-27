@@ -76,6 +76,7 @@ function createPackedBinary(licenseType, hwid, callback) {
     const mac = packerOutput.mac;
     const key = packerOutput.key;
     const computedHwid = packerOutput.hwid;
+    const integrity = packerOutput.integrity;
     
     if (!mac || mac.length !== 32) {
       return callback(new Error('Invalid MAC in packer output'));
@@ -99,6 +100,7 @@ function createPackedBinary(licenseType, hwid, callback) {
       mac: mac,
       key: key,
       hwid: computedHwid || null,
+      integrity: integrity || null,
       filename: zipName,
       data: zipBuffer
     });

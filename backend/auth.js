@@ -103,12 +103,54 @@ function verifySpeck128Mac(data, keyHex, expectedMacHex) {
   return crypto.timingSafeEqual(computedBuf, expectedBuf);
 }
 
-function verifyHwidIntegrity(hwidData, key, mac) {
+function verifyHwidIntegrity(licenseId, sum, cpu, disk, mac, ram, callback) {
   try {
-    return verifySpeck128Mac(hwidData, key, mac);
+    const license = getLicenseById(licenseId);
+    if (!license || !license.stub_mac) {
+      return callback({ valid: false, error: 'License not found' });
+    }
+    
+    if (new Date(license.expires_at) < new Date()) {
+      return callback({ valid: false, error: 'License expired' });
+    }
+    
+    const cpuStr = cpu ? cpu.slice(0, 16).padEnd(16, '\0') : '';
+    const diskStr = disk ? disk.slice(0, 16).padEnd(16, '\0') : '';
+    const macStr = mac ? mac.slice(0, 16).padEnd(16, '\0') : '';
+    const ramStr = ram ? ram.slice(0, 16).padEnd(16, '\0') : '';
+    
+    const data = Buffer.alloc(80);
+    
+    const stubMacBuf = Buffer.from(license.stub_mac, 'hex');
+    stubMacBuf.copy(data, 0, 0, 16);
+    
+    Buffer.from(cpuStr, 'utf8').copy(data, 16, 0, 16);
+    Buffer.from(diskStr, 'utf8').copy(data, 32, 0, 16);
+    Buffer.from(macStr, 'utf8').copy(data, 48, 0, 16);
+    Buffer.from(ramStr, 'utf8').copy(data, 64, 0, 16);
+    
+    const keyHex = license.stub_mac;
+    const [computed0, computed1] = speckCbcMac(data, keyHex);
+    
+    const computedMac = Buffer.alloc(16);
+    computedMac.writeBigUInt64LE(computed0, 0);
+    computedMac.writeBigUInt64LE(computed1, 8);
+    
+    const expectedMac = Buffer.from(sum, 'hex');
+    const databaseHwid = license.hwid;
+    
+    const valid1 = crypto.timingSafeEqual(computedMac, expectedMac);
+    const valid2 = crypto.timingSafeEqual(expectedMac, databaseHwid);
+    const valid3 = crypto.timingSafeEqual(computedMac, databaseHwid);
+
+    if (!valid1 || !valid2 || !valid3) {
+      return callback({ valid: false, error: 'Hardware ID integrity check failed' });
+    }
+
+    return callback({ valid: true, type: license.type });
   } catch (e) {
     console.error('HWID verification error:', e.message);
-    return false;
+    return callback({ valid: false, error: 'Verification failed' });
   }
 }
 
@@ -264,7 +306,7 @@ function getLicenseByUserId(userId) {
 
 function getLicenseById(licenseId) {
   const stmt = db.prepare(`
-    SELECT l.license_id, l.type, l.expires_at, l.user_id, l.hwid as license_hwid, l.stub_mac, u.email, u.account_number, u.hwid as user_hwid, u.speck_key
+    SELECT l.license_id, l.type, l.expires_at, l.user_id, l.hwid as license_hwid, l.stub_mac, l.integrity, u.email, u.account_number, u.hwid as user_hwid, u.speck_key
     FROM licenses l
     JOIN users u ON l.user_id = u.id
     WHERE l.license_id = ?
@@ -320,6 +362,11 @@ function updateLicenseStubMac(licenseId, stubMac) {
 function updateLicenseHwid(licenseId, hwid) {
   const stmt = db.prepare(`UPDATE licenses SET hwid = ? WHERE license_id = ?`);
   stmt.run(hwid, licenseId);
+}
+
+function updateLicenseIntegrity(licenseId, integrity) {
+  const stmt = db.prepare(`UPDATE licenses SET integrity = ? WHERE license_id = ?`);
+  stmt.run(integrity, licenseId);
 }
 
 function logProductVerification(licenseId, ip, success) {
@@ -396,29 +443,21 @@ function getSpeckKey(userId) {
   return user ? user.speck_key : null;
 }
 
-function generateSpeckKey(userId) {
-  const key = crypto.randomBytes(16).toString('hex');
-  const stmt = db.prepare(`UPDATE users SET speck_key = ? WHERE id = ?`);
-  stmt.run(key, userId);
-  return key;
-}
-
 function updateUserSpeckKey(userId, key) {
   const stmt = db.prepare(`UPDATE users SET speck_key = ? WHERE id = ?`);
   stmt.run(key, userId);
 }
 
-function getOrCreateSpeckKey(userId) {
-  let key = getSpeckKey(userId);
-  if (!key) {
-    key = generateSpeckKey(userId);
+function computeHwidFromMachineInfo(machineInfo, license) {
+  if (!license.integrity || !license.stub_mac) {
+    console.error('Missing integrity or stub_mac in license');
+    return null;
   }
-  return key;
-}
-
-function computeHwidFromMachineInfo(machineInfo, speckKey) {
-  const data = Buffer.alloc(64);
-  let offset = 0;
+  
+  const data = Buffer.alloc(80);
+  
+  const stubMacBuf = Buffer.from(license.stub_mac, 'hex');
+  stubMacBuf.copy(data, 0);
   
   const fields = [
     machineInfo.cpu_serial,
@@ -427,6 +466,7 @@ function computeHwidFromMachineInfo(machineInfo, speckKey) {
     machineInfo.ram_serial
   ];
   
+  let offset = 16;
   for (const field of fields) {
     const fieldData = field || '';
     const fieldBuffer = Buffer.from(fieldData, 'utf8');
@@ -435,7 +475,8 @@ function computeHwidFromMachineInfo(machineInfo, speckKey) {
   }
   
   try {
-    const [mac0, mac1] = speckCbcMac(data, speckKey);
+    const keyHex = license.integrity;
+    const [mac0, mac1] = speckCbcMac(data, keyHex);
     const macBuffer = Buffer.alloc(16);
     macBuffer.writeBigUInt64LE(mac0, 0);
     macBuffer.writeBigUInt64LE(mac1, 8);
@@ -487,9 +528,7 @@ module.exports = {
   cleanupOldSessions,
   verifyHwidIntegrity,
   getSpeckKey,
-  generateSpeckKey,
   updateUserSpeckKey,
-  getOrCreateSpeckKey,
   computeHwidFromMachineInfo,
   getUserByLicenseId,
   isRelinkRateLimited,
@@ -497,6 +536,7 @@ module.exports = {
   updateLicenseDownloadFilename,
   updateLicenseStubMac,
   updateLicenseHwid,
+  updateLicenseIntegrity,
   isTxCreateRateLimited,
   addTxCreateAttempt,
   cleanupOldTxCreateRateLimits,

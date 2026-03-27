@@ -314,7 +314,7 @@ async function checkPendingPayments() {
             console.log('Transaction', tx.id, 'confirmations:', newConfirmations);
           }
           
-          if (newConfirmations >= 5) {
+          if (newConfirmations >= 10) {
             console.log('Payment confirmed for transaction:', tx.id);
             await activateLicense(tx.id);
           }
