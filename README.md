@@ -152,6 +152,7 @@ The hwid is verified by re-computing the MAC and comparing against the stored va
 - tor daemon (for proxy)
 - monerod + monero-wallet-rpc
 - electrum-ltc
+- veracrypt (for storing db and js files, mount when in use)
 
 ## api reference
 
