@@ -24,6 +24,7 @@ a cryptocurrency software licensing platform built with privacy-first principles
   - extensive input validation and regex
   - SPECK-128-CBC-MAC for hwid integrity verification
   - auto-delete XMR transactions after 7 days
+  - escaping inner html to prevent XSS injection
 
 - **tor-over-clearnet**
   - socks5 proxy routes clearnet traffic through tor
