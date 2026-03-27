@@ -199,4 +199,4 @@ The hwid is verified by re-computing the MAC and comparing against the stored va
 
 ## license
 
-Apache 2.0
+licensed under modified ACSL 1.4
