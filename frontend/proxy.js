@@ -123,9 +123,9 @@ const apiKeyAuth = (req, res, next) => {
 
 const apiRouter = express.Router();
 
+apiRouter.use(rateLimiter);
 apiRouter.use(express.json({ limit: '50kb' }));
 apiRouter.use(crawlerBlocker);
-apiRouter.use(rateLimiter);
 apiRouter.use(apiKeyAuth);
 apiRouter.all('*', proxyRequest);
 

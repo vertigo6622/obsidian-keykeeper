@@ -2,6 +2,17 @@ let socket = null;
 let currentUser = null;
 let lastTabBeforeLicense = 'tab-purchase';
 
+function esc(str) {
+  if (!str) return '';
+  return String(str).replace(/[&<>"']/g, c => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;'
+  }[c]));
+}
+
 function setLastTabBeforeLicense() {
   const checked = document.querySelector('input[name="tabs"]:checked');
   lastTabBeforeLicense = checked ? checked.id : 'tab-purchase';
@@ -31,7 +42,7 @@ function connectToBackend() {
         processingPanel.innerHTML = `
           <label class="back-btn" for="tab-payment">&lt; back</label>
           <h1>Processing Payment</h1>
-          <p>transaction detected: ${data.tx_id}</p>
+          <p>transaction detected: ${esc(data.tx_id)}</p>
           <p>waiting for confirmations<span class="loader"><span>.</span><span>.</span><span>.</span></span></p>
         `;
       }
@@ -44,7 +55,7 @@ function connectToBackend() {
         processingPanel.innerHTML = `
           <label class="back-btn" for="tab-transactions">&lt; back</label>
           <h1>Payment Complete!</h1>
-          <p>license id: ${data.license_id}</p>
+          <p>license id: ${esc(data.license_id)}</p>
           <p>transaction complete</p>
         `;
         setTimeout(() => {
@@ -85,6 +96,13 @@ function connectToBackend() {
   
   socket.on('disconnect', () => {
     console.log('Disconnected from backend');
+  });
+
+  socket.on('session:timeout', (data) => {
+    console.log('Session timeout:', data.message);
+    currentUser = null;
+    showLoggedOutUI();
+    alert('Your session has expired due to inactivity. Please log in again.');
   });
 
   socket.on('auth:login:res', (data) => {
@@ -149,14 +167,10 @@ function showLoggedOutUI() {
   if (authBtn) {
     authBtn.textContent = 'log in';
   }
-  document.getElementById('panel-balance').innerHTML = `
-    <label class="back-btn" for="tab-transactions">&lt; back</label>
-    <h1>Balance</h1>
-    <p>monero balance: 0.000000 XMR</p>
-    <p>litecoin balance: 0.000000 LTC</p>
-    <p>usd credits: $0.00 USD</p>
-    <label class="tx-box" for="tab-withdraw" style="margin-top: 10px; display: inline-block;">withdraw</label>
-  `;
+  
+  document.getElementById('balance-xmr').textContent = 'monero balance: 0.000000 XMR';
+  document.getElementById('balance-ltc').textContent = 'litecoin balance: 0.000000 LTC';
+  document.getElementById('balance-usd').textContent = 'usd credits: $0.00 USD';
 }
 
 function updateProfileUI() {
@@ -165,24 +179,22 @@ function updateProfileUI() {
   const profileContent = `
     <label class="back-btn" for="tab-transactions">&lt; back</label>
     <h1>Profile</h1>
-    <p>account number: ${currentUser.account_number}</p>
-    <p>email: ${currentUser.email}</p>
-    <p>license: ${currentUser.license || 'none'}</p>
+    <p>account number: ${esc(currentUser.account_number)}</p>
+    <p>email: ${esc(currentUser.email)}</p>
+    <p>license: ${esc(currentUser.license) || 'none'}</p>
     <p style="margin-top: 16px;"><span class="link-btn" onclick="document.getElementById('tab-manage').checked = true;">manage license</span></p>
   `;
   document.getElementById('panel-profile').innerHTML = profileContent;
   
   updateManageLicenseUI();
   
-  const balanceContent = `
-    <label class="back-btn" for="tab-transactions">&lt; back</label>
-    <h1>Balance</h1>
-    <p>monero balance: ${currentUser.balance.xmr.toFixed(6)} XMR</p>
-    <p>litecoin balance: ${currentUser.balance.ltc.toFixed(6)} LTC</p>
-    <p>usd credits: $${currentUser.balance.usd} USD</p>
-    <label class="tx-box" for="tab-withdraw" style="margin-top: 10px; display: inline-block;">withdraw</label>
-  `;
-  document.getElementById('panel-balance').innerHTML = balanceContent;
+  const xmrEl = document.getElementById('balance-xmr');
+  const ltcEl = document.getElementById('balance-ltc');
+  const usdEl = document.getElementById('balance-usd');
+  
+  if (xmrEl) xmrEl.textContent = `monero balance: ${currentUser.balance.xmr.toFixed(6)} XMR`;
+  if (ltcEl) ltcEl.textContent = `litecoin balance: ${currentUser.balance.ltc.toFixed(6)} LTC`;
+  if (usdEl) usdEl.textContent = `usd credits: $${currentUser.balance.usd} USD`;
 }
 
 function updateManageLicenseUI() {
@@ -318,19 +330,10 @@ function createTransaction(currency, licenseType, hwid, callback) {
 function displayTransaction(tx) {
   const content = `
     <div class="pgp-box">
-      <pre>-----BEGIN PGP SIGNED MESSAGE-----
-Hash: SHA512
-
-Payment Address:
-${tx.address}
-
-Amount: ${tx.amount} ${tx.currency}
------BEGIN PGP SIGNATURE-----
-${tx.signed_address}
------END PGP SIGNATURE-----</pre>
+      <pre>${esc(tx.signed_address)}</pre>
     </div>
-    <p style="margin-top: 10px;">transaction id: ${tx.tx_id}</p>
-    <p style="margin-top: 10px;">license id: ${tx.license_id}</p>
+    <p style="margin-top: 10px;">transaction id: ${esc(tx.tx_id)}</p>
+    <p style="margin-top: 10px;">license id: ${esc(tx.license_id)}</p>
     <p style="margin-top: 10px;">amount: ${tx.amount.toFixed(6)} ${tx.currency}</p>
     <p style="margin-top: 10px;">waiting for transaction<span class="loader"><span>.</span><span>.</span><span>.</span></span></p>
   `;
@@ -354,7 +357,7 @@ function doWithdraw(currency, amount, address) {
         <label class="back-btn" for="tab-withdraw">&lt; back</label>
         <h1>Withdrawing</h1>
         <p>broadcasting transaction<span class="loader"><span>.</span><span>.</span><span>.</span></span></p>
-        <p style="margin-top: 10px;">transaction id: ${response.tx_id}</p>
+        <p style="margin-top: 10px;">transaction id: ${esc(response.tx_id)}</p>
       `;
     } else {
       alert(response.error || 'Withdrawal failed');
@@ -384,11 +387,11 @@ function displayTransactionHistory(history) {
         content += `
           <div style="border: 0.5px solid #fff; padding: 8px; margin-top: 8px;">
             <p><strong>Transaction</strong></p>
-            <p>Type: ${item.subtype}</p>
-            <p>Currency: ${item.currency}</p>
+            <p>Type: ${esc(item.subtype)}</p>
+            <p>Currency: ${esc(item.currency)}</p>
             <p>Amount: ${item.amount}</p>
-            <p>Status: ${item.status}</p>
-            ${item.tx_hash ? `<p>TX Hash: ${item.tx_hash}</p>` : ''}
+            <p>Status: ${esc(item.status)}</p>
+            ${item.tx_hash ? `<p>TX Hash: ${esc(item.tx_hash)}</p>` : ''}
             <p>Date: ${new Date(item.date).toLocaleString()}</p>
           </div>
         `;
@@ -396,8 +399,8 @@ function displayTransactionHistory(history) {
         content += `
           <div style="border: 0.5px solid #fff; padding: 8px; margin-top: 8px;">
             <p><strong>License</strong></p>
-            <p>License ID: ${item.license_id}</p>
-            <p>Type: ${item.license_type}</p>
+            <p>License ID: ${esc(item.license_id)}</p>
+            <p>Type: ${esc(item.license_type)}</p>
             <p>Expires: ${item.expires_at ? new Date(item.expires_at).toLocaleString() : 'Never'}</p>
             <p>Created: ${new Date(item.date).toLocaleString()}</p>
           </div>
