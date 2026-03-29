@@ -2,6 +2,10 @@
 
 a cryptocurrency software licensing platform built with privacy-first principles. users can purchase software licenses using monero (xmr) or litecoin (ltc), with licenses bound to hardware ids for copy-protection. it is the backend of the obsidian pro and commerical licensing, but can be adapted for any application that requires securely handling licensing and drm.
 
+security features include: tor-over-clearnet backend, and a site pgp key with pgp signed ltc and xmr addresses to protect from phishing. users are identified with an account number. keykeeper does not support email sign-up at this time. this way, licensing protections can be upheld without collecting excessive user data. there are also automatic suspensions for any detected tampering with the licensing code using cryptographically secure SPECK-CBC-MAC hashes which prevent spoofing. 
+
+this model requires that the stub (the small section of code that executes the obsidian-packed payload) contact keykeeper first, in order to acquire the decryption key for the obsidian pro/commerical product. this happens through the clearnet proxy, redirecting them through tor to the keykeeper server. the server receives both the stubs calculated hash as well as the components that make up the hash. it then calculates the hash independently and compares across three domains, database hardware id, server-calculated hardware id, and the stubs returned hardware id. any mismatch and the server will refuse to issue the key.
+
 ## features
 
 - **license types (configurable)**
