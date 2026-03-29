@@ -1,6 +1,20 @@
 let socket = null;
 let currentUser = null;
 let lastTabBeforeLicense = 'tab-purchase';
+let lastTabBeforePro = 'tab-about';
+
+function setLastTabBeforePro() {
+  const checked = document.querySelector('input[name="tabs"]:checked');
+  const currentTab = checked ? checked.id : 'tab-about';
+  const proSubPages = ['tab-commercial', 'tab-features', 'tab-how-it-evades'];
+  if (currentTab !== 'tab-pro' && !proSubPages.includes(currentTab)) {
+    lastTabBeforePro = currentTab;
+  }
+}
+
+function goBackFromPro() {
+  document.getElementById(lastTabBeforePro).checked = true;
+}
 
 function esc(str) {
   if (!str) return '';
@@ -37,12 +51,17 @@ function connectToBackend() {
     
     socket.on('tx:detected', (data) => {
       console.log('Transaction detected:', data);
-      const processingPanel = document.getElementById('monero-processing') || document.getElementById('litecoin-processing');
-      if (processingPanel) {
-        processingPanel.innerHTML = `
+      const panelMap = {
+        'XMR': 'panel-monero-processing',
+        'LTC': 'panel-litecoin-processing'
+      };
+      const panel = document.getElementById(panelMap[data.currency]);
+      if (panel) {
+        panel.innerHTML = `
           <label class="back-btn" for="tab-payment">&lt; back</label>
           <h1>Processing Payment</h1>
           <p>transaction detected: ${esc(data.tx_id)}</p>
+          <p>amount: ${data.amount} ${data.currency}</p>
           <p>waiting for confirmations<span class="loader"><span>.</span><span>.</span><span>.</span></span></p>
         `;
       }
@@ -50,9 +69,13 @@ function connectToBackend() {
     
     socket.on('tx:confirmed', (data) => {
       console.log('Transaction confirmed:', data);
-      const processingPanel = document.getElementById('monero-processing') || document.getElementById('litecoin-processing');
-      if (processingPanel) {
-        processingPanel.innerHTML = `
+      const panelMap = {
+        'XMR': 'panel-monero-processing',
+        'LTC': 'panel-litecoin-processing'
+      };
+      const panel = document.getElementById(panelMap[data.currency]);
+      if (panel) {
+        panel.innerHTML = `
           <label class="back-btn" for="tab-transactions">&lt; back</label>
           <h1>Payment Complete!</h1>
           <p>license id: ${esc(data.license_id)}</p>
@@ -180,7 +203,6 @@ function updateProfileUI() {
     <label class="back-btn" for="tab-transactions">&lt; back</label>
     <h1>Profile</h1>
     <p>account number: ${esc(currentUser.account_number)}</p>
-    <p>email: ${esc(currentUser.email)}</p>
     <p>license: ${esc(currentUser.license) || 'none'}</p>
     <p style="margin-top: 16px;"><span class="link-btn" onclick="document.getElementById('tab-manage').checked = true;">manage license</span></p>
   `;
@@ -195,6 +217,28 @@ function updateProfileUI() {
   if (xmrEl) xmrEl.textContent = `monero balance: ${currentUser.balance.xmr.toFixed(6)} XMR`;
   if (ltcEl) ltcEl.textContent = `litecoin balance: ${currentUser.balance.ltc.toFixed(6)} LTC`;
   if (usdEl) usdEl.textContent = `usd credits: $${currentUser.balance.usd} USD`;
+  
+  const pending = currentUser.pending_transaction;
+  const xmrBtn = document.getElementById('start-tx-btn');
+  const ltcBtn = document.getElementById('start-ltc-btn');
+  const xmrWarning = document.getElementById('pending-xmr-warning');
+  const ltcWarning = document.getElementById('pending-ltc-warning');
+  
+  if (!pending) {
+    if (xmrBtn) { xmrBtn.style.pointerEvents = 'auto'; xmrBtn.style.opacity = '1'; }
+    if (ltcBtn) { ltcBtn.style.pointerEvents = 'auto'; ltcBtn.style.opacity = '1'; }
+    if (xmrWarning) xmrWarning.style.display = 'none';
+    if (ltcWarning) ltcWarning.style.display = 'none';
+    return;
+  }
+  
+  if (pending.currency === 'XMR') {
+    if (xmrBtn) { xmrBtn.style.pointerEvents = 'none'; xmrBtn.style.opacity = '0.5'; }
+    if (xmrWarning) xmrWarning.style.display = 'block';
+  } else if (pending.currency === 'LTC') {
+    if (ltcBtn) { ltcBtn.style.pointerEvents = 'none'; ltcBtn.style.opacity = '0.5'; }
+    if (ltcWarning) ltcWarning.style.display = 'block';
+  }
 }
 
 function updateManageLicenseUI() {
@@ -211,7 +255,6 @@ function updateManageLicenseUI() {
   const timeRemainingEl = document.getElementById('manage-time-remaining');
   const licenseTypeEl = document.getElementById('manage-license-type');
   const hwidEl = document.getElementById('manage-hwid');
-  const emailEl = document.getElementById('manage-email');
   
   if (licenseIdEl) licenseIdEl.textContent = 'license id: ' + (currentUser.license_id || 'none');
   if (timeRemainingEl) {
@@ -223,7 +266,6 @@ function updateManageLicenseUI() {
   }
   if (licenseTypeEl) licenseTypeEl.textContent = 'license type: ' + (currentUser.license || 'none');
   if (hwidEl) hwidEl.textContent = 'linked hwid: ' + (currentUser.hwid || 'N/A');
-  if (emailEl) emailEl.textContent = 'email: ' + currentUser.email;
   
   updateDownloadUI();
 }
@@ -257,13 +299,13 @@ function updateDownloadUI() {
   }
 }
 
-function doLogin(email, password, callback) {
+function doLogin(account_number, password, callback) {
   if (!socket || !socket.connected) {
     connectToBackend();
-    setTimeout(() => doLogin(email, password, callback), 500);
+    setTimeout(() => doLogin(account_number, password, callback), 1000);
     return;
   }
-  socket.emit('auth:login', { email, password }, (response) => {
+  socket.emit('auth:login', { account_number, password }, (response) => {
     if (response.success) {
       socket.emit('user:getProfile', {}, (profile) => {
         currentUser = profile;
@@ -281,19 +323,21 @@ function doLogin(email, password, callback) {
   });
 }
 
-function doRegister(email, password, callback) {
+function doRegister(password, callback) {
   if (!socket || !socket.connected) {
     connectToBackend();
-    setTimeout(() => doRegister(email, password, callback), 500);
+    setTimeout(() => doRegister(password, callback), 500);
     return;
   }
-  socket.emit('auth:register', { email, password, hwid: getHwid() }, (response) => {
+  socket.emit('auth:register', { password, hwid: getHwid() }, (response) => {
     if (response.success) {
       socket.emit('user:getProfile', {}, (profile) => {
         currentUser = profile;
         showLoggedInUI();
         if (callback) callback(true);
       });
+      document.getElementById('new-account-number').textContent = response.accountNumber;
+      document.getElementById('tab-account-created').checked = true;
     } else {
       const feedback = document.getElementById('register-feedback');
       if (feedback) {
@@ -321,27 +365,44 @@ function createTransaction(currency, licenseType, hwid, callback) {
     if (response.success) {
       displayTransaction(response);
     } else {
-      alert(response.error || 'Failed to create transaction');
+      const isRateLimit = response.error && response.error.toLowerCase().includes('too many');
+      if (isRateLimit) {
+        if (currency === 'XMR') {
+          document.getElementById('start-tx-btn').style.display = 'none';
+          document.getElementById('rate-limit-msg').style.display = 'block';
+        } else if (currency === 'LTC') {
+          document.getElementById('start-ltc-btn').style.display = 'none';
+          document.getElementById('rate-limit-msg-ltc').style.display = 'block';
+        }
+      } else {
+        alert(response.error || 'Failed to create transaction');
+      }
     }
     if (callback) callback(response);
   });
 }
 
 function displayTransaction(tx) {
-  const content = `
-    <div class="pgp-box">
-      <pre>${esc(tx.signed_address)}</pre>
-    </div>
-    <p style="margin-top: 10px;">transaction id: ${esc(tx.tx_id)}</p>
-    <p style="margin-top: 10px;">license id: ${esc(tx.license_id)}</p>
-    <p style="margin-top: 10px;">amount: ${tx.amount.toFixed(6)} ${tx.currency}</p>
-    <p style="margin-top: 10px;">waiting for transaction<span class="loader"><span>.</span><span>.</span><span>.</span></span></p>
-  `;
+  const tabMap = {
+    'XMR': 'tab-monero-processing',
+    'LTC': 'tab-litecoin-processing'
+  };
   
   const panelMap = {
     'XMR': 'panel-monero-processing',
     'LTC': 'panel-litecoin-processing'
   };
+  
+  document.getElementById(tabMap[tx.currency]).checked = true;
+  
+  const content = `
+    <div class="pgp-box">
+      <pre>${esc(tx.signed_address)}</pre>
+    </div>
+    <p style="margin-top: 10px;">transaction id: ${esc(tx.tx_id || 'pending')}</p>
+    <p style="margin-top: 10px;">amount: ${tx.amount} ${tx.currency}</p>
+    <p style="margin-top: 10px;">waiting for transaction<span class="loader"><span>.</span><span>.</span><span>.</span></span></p>
+  `;
   
   const panel = document.getElementById(panelMap[tx.currency]);
   if (panel) {
@@ -450,29 +511,11 @@ function doChangePassword(oldPassword, newPassword, callback) {
   });
 }
 
-function doChangeEmail(oldPassword, newEmail, callback) {
-  socket.emit('user:changeEmail', { oldPassword, newEmail }, (response) => {
-    callback(response);
-  });
-}
-
 function doDeleteAccount(password, callback) {
   socket.emit('user:deleteAccount', { password }, (response) => {
     if (response.success) {
       currentUser = null;
     }
-    callback(response);
-  });
-}
-
-function getNotifications(callback) {
-  socket.emit('user:getNotifications', {}, (response) => {
-    callback(response.enabled);
-  });
-}
-
-function setNotifications(enabled, callback) {
-  socket.emit('user:setNotifications', { enabled }, (response) => {
     callback(response);
   });
 }
@@ -501,10 +544,7 @@ window.obsidianClient = {
   canRelink: canRelink,
   getHwid: getHwid,
   changePassword: doChangePassword,
-  changeEmail: doChangeEmail,
   deleteAccount: doDeleteAccount,
-  getNotifications: getNotifications,
-  setNotifications: setNotifications,
   getSessions: getSessions,
   logoutAll: logoutAll,
   logout: function() {

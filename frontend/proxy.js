@@ -9,7 +9,42 @@ const app = express();
 app.disable('x-powered-by');
 app.disable('etag');
 
-let ONION_ADDRESS = process.env.ONION_ADDRESS;
+const ALLOWED_ORIGINS = [
+  'http://localhost',
+  'http://localhost:3000',
+  'http://localhost:8080',
+  'http://127.0.0.1',
+  'http://127.0.0.1:3000',
+  'http://127.0.0.1:8080',
+  'https://obsidian.st',
+  'http://obsidian.st'
+];
+
+function isOriginAllowed(req) {
+  const referer = req.headers.referer || '';
+  const origin = req.headers.origin || '';
+  const host = req.headers.host || '';
+  
+  const checkUrl = (url) => {
+    return ALLOWED_ORIGINS.some(allowed => 
+      url.startsWith(allowed) || url === allowed
+    );
+  };
+  
+  return checkUrl(referer) || checkUrl(origin) || checkUrl('http://' + host);
+}
+
+const originValidator = (req, res, next) => {
+  if (req.path.startsWith('/api')) {
+    if (!isOriginAllowed(req)) {
+      console.log('Blocked request from:', req.headers.origin, req.headers.referer, req.ip);
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+  }
+  next();
+};
+
+app.use(originValidator);
 const ONION_PORT = process.env.ONION_PORT || 3000;
 const SOCKS_PROXY = process.env.SOCKS_PROXY || '127.0.0.1:9050';
 const PORT = process.env.PORT || 8080;
