@@ -95,16 +95,7 @@ function speckCbcMac(data, keyHex) {
   return [chain0, chain1];
 }
 
-function verifySpeck128Mac(data, keyHex, expectedMacHex) {
-  const [computed0, computed1] = speckCbcMac(data, keyHex);
-  const computedBuf = Buffer.alloc(16);
-  computedBuf.writeBigUInt64LE(computed0, 0);
-  computedBuf.writeBigUInt64LE(computed1, 8);
-  const expectedBuf = Buffer.from(expectedMacHex, 'hex');
-  return crypto.timingSafeEqual(computedBuf, expectedBuf);
-}
-
-function verifyHwidIntegrity(licenseId, sum, cpu, disk, mac, ram, callback) {
+function verifyHwidIntegrity(licenseId, sum, cpu, disk, mac, ram, tpm, callback) {
   try {
     const license = getLicenseById(licenseId);
     if (!license || !license.stub_mac) {
@@ -119,8 +110,9 @@ function verifyHwidIntegrity(licenseId, sum, cpu, disk, mac, ram, callback) {
     const diskStr = disk ? disk.slice(0, 16).padEnd(16, '\0') : '';
     const macStr = mac ? mac.slice(0, 16).padEnd(16, '\0') : '';
     const ramStr = ram ? ram.slice(0, 16).padEnd(16, '\0') : '';
+    const tpmStr = tpm ? tpm.slice(0, 16).padEnd(16, '\0') : '';
     
-    const data = Buffer.alloc(80);
+    const data = Buffer.alloc(96);
     
     const stubMacBuf = Buffer.from(license.stub_mac, 'hex');
     stubMacBuf.copy(data, 0, 0, 16);
@@ -129,6 +121,7 @@ function verifyHwidIntegrity(licenseId, sum, cpu, disk, mac, ram, callback) {
     Buffer.from(diskStr, 'utf8').copy(data, 32, 0, 16);
     Buffer.from(macStr, 'utf8').copy(data, 48, 0, 16);
     Buffer.from(ramStr, 'utf8').copy(data, 64, 0, 16);
+    Buffer.from(tpmStr, 'utf8').copy(data, 80, 0, 16);
     
     const keyHex = license.stub_mac;
     const [computed0, computed1] = speckCbcMac(data, keyHex);
@@ -146,9 +139,9 @@ function verifyHwidIntegrity(licenseId, sum, cpu, disk, mac, ram, callback) {
 
     if (!valid1 || !valid2 || !valid3) {
       return callback({ valid: false, error: 'Hardware ID integrity check failed' });
+    } else {
+      return callback({ valid: true, type: license.type });
     }
-
-    return callback({ valid: true, type: license.type });
   } catch (e) {
     console.error('HWID verification error:', e.message);
     return callback({ valid: false, error: 'Verification failed' });
@@ -163,11 +156,9 @@ function generateAccountNumber() {
     for (let j = 0; j < 12; j++) {
       result += String(bytes[j] % 10);
     }
-    // Ensure first digit is not 0
     if (result[0] === '0') {
       result = String(Math.floor(Math.random() * 9) + 1) + result.slice(1);
     }
-    // Check if already exists
     const existing = db.prepare('SELECT id FROM users WHERE account_number = ?').get(result);
     if (!existing) {
       return result;
@@ -445,16 +436,14 @@ function computeHwidFromMachineInfo(machineInfo, license) {
     return null;
   }
   
-  const data = Buffer.alloc(80);
-  
-  const stubMacBuf = Buffer.from(license.stub_mac, 'hex');
-  stubMacBuf.copy(data, 0);
+  const data = Buffer.alloc(96);
   
   const fields = [
     machineInfo.cpu_serial,
     machineInfo.disk_serial,
     machineInfo.mac_address,
-    machineInfo.ram_serial
+    machineInfo.ram_serial,
+    machineInfo.tpm_ek
   ];
   
   let offset = 16;
@@ -466,7 +455,7 @@ function computeHwidFromMachineInfo(machineInfo, license) {
   }
   
   try {
-    const keyHex = license.integrity;
+    const keyHex = license.stub_mac;
     const [mac0, mac1] = speckCbcMac(data, keyHex);
     const macBuffer = Buffer.alloc(16);
     macBuffer.writeBigUInt64LE(mac0, 0);

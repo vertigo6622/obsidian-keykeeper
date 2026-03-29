@@ -300,7 +300,7 @@ io.on('connection', (socket) => {
   
   socket.on('license:verify', async (data, callback) => {
     try {
-      const { licenseId, sum, cpu, disk, mac, ram } = data;
+      const { licenseId, sum, mac, cpu, disk, ram, tpm } = data;
       const ip = socket.handshake.address || 'unknown';
       
       const sanitizedLicenseId = validate.sanitizeLicenseId(licenseId);
@@ -308,30 +308,29 @@ io.on('connection', (socket) => {
         return callback({ valid: false, error: 'Invalid license ID format' });
       }
       
-      if (!sum || !cpu || !disk || !mac || !ram) {
-        return callback({ valid: false, error: 'sum, cpu, disk, mac, and ram required' });
+      if (!sum || !mac || !cpu || !disk || !ram || !tpm) {
+        return callback({ valid: false, error: 'sum, cpu, disk, mac, ram, and tpm required' });
       }
       
       if (auth.isHwidVerifyRateLimited(null, ip)) {
         return callback({ valid: false, error: 'Too many verification attempts. Try again later.' });
       }
-      
-      auth.verifyHwidIntegrity(sanitizedLicenseId, sum, cpu, disk, mac, ram, (result) => {
-        if (!result.valid) {
-          return callback(result);
-        }
-        
-        const license = auth.getLicenseById(sanitizedLicenseId);
+
+      const license = auth.getLicenseById(sanitizedLicenseId);
         
         if (license.stub_mac) {
-          const clientStubMac = data.stub_mac || '';
+          const clientStubMac = data.mac || '';
           if (clientStubMac && license.stub_mac !== clientStubMac) {
             auth.suspendAccount(license.user_id);
             return callback({ valid: false, error: 'License violated' });
           }
         }
-        
-        auth.addHwidVerifyAttempt(null, ip);
+      
+      auth.addHwidVerifyAttempt(null, ip);
+      auth.verifyHwidIntegrity(sanitizedLicenseId, sum, mac, cpu, disk, ram, tpm, (result) => {
+        if (!result.valid) {
+          return callback(result);
+        }
         
         socket.request.session.userId = license.user_id;
         socket.request.session.licenseId = sanitizedLicenseId;
@@ -528,7 +527,7 @@ io.on('connection', (socket) => {
     callback({
       success: true,
       speckKey: speckKey,
-      machineInfoFields: ['cpu_serial', 'disk_serial', 'mac_address', 'ram_serial']
+      machineInfoFields: ['cpu_serial', 'disk_serial', 'mac_address', 'ram_serial', 'tpm_key']
     });
   });
 
@@ -565,7 +564,8 @@ io.on('connection', (socket) => {
       cpu_serial: validate.sanitizeString(machineInfo.cpu_serial, 64) || '',
       disk_serial: validate.sanitizeString(machineInfo.disk_serial, 64) || '',
       mac_address: validate.sanitizeString(machineInfo.mac_address, 64) || '',
-      ram_serial: validate.sanitizeString(machineInfo.ram_serial, 256) || ''
+      ram_serial: validate.sanitizeString(machineInfo.ram_serial, 256) || '',
+      tpm_key: validate.sanitizeString(machineInfo.tpm_key, 256) || ''
     };
     
     const computedHwid = auth.computeHwidFromMachineInfo(sanitizedMachineInfo, license);
@@ -682,7 +682,7 @@ app.get('/api/downloads/:filename', (req, res) => {
   }
   
   const filename = req.params.filename;
-  const validFiles = ['obsidian-ce.exe'];
+  const validFiles = ['obsidian-ce.exe', 'hwid_link.py'];
   if (!validFiles.includes(filename)) {
     return res.send();
   }

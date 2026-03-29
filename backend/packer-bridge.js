@@ -11,7 +11,7 @@ const BASE_BINARIES = {
 };
 
 function generateRandomFilename() {
-  return crypto.randomBytes(6).toString('hex');
+  return 'obisidan_pro_' + crypto.randomBytes(6).toString('hex');
 }
 
 function createPackedBinary(licenseType, hwid, callback) {
@@ -31,8 +31,7 @@ function createPackedBinary(licenseType, hwid, callback) {
   if (!fs.existsSync(outputDir)) {
     fs.mkdirSync(outputDir, { recursive: true });
   }
-  
-  const randomName = generateRandomFilename();
+
   const outputPath = path.join(outputDir, randomName + '.exe');
   
   const args = ['--compress', '--ultra', '--fix'];
@@ -75,8 +74,7 @@ function createPackedBinary(licenseType, hwid, callback) {
     
     const mac = packerOutput.mac;
     const key = packerOutput.key;
-    const computedHwid = packerOutput.hwid;
-    const integrity = packerOutput.integrity;
+    const integrity = packerOutput.integrityKey;
     
     if (!mac || mac.length !== 32) {
       return callback(new Error('Invalid MAC in packer output'));
@@ -89,20 +87,25 @@ function createPackedBinary(licenseType, hwid, callback) {
     if (!fs.existsSync(outputPath)) {
       return callback(new Error('Packer did not produce output file'));
     }
+
+    if (!integrity) {
+      return callback(new Error('Packer did not produce integrity key'));
+    } 
     
     const binaryData = fs.readFileSync(outputPath);
     fs.unlink(outputPath, () => {});
-    
-    const zipName = randomName + '.gz';
-    const zipBuffer = zlib.gzipSync(binaryData);
+
+    const randomName = generateRandomFilename();
+    const gzipName = randomName + '.gz';
+    const gzipBuffer = zlib.gzipSync(binaryData);
     
     callback(null, {
       mac: mac,
       key: key,
-      hwid: computedHwid || null,
-      integrity: integrity || null,
-      filename: zipName,
-      data: zipBuffer
+      hwid: null,
+      integrity: integrity,
+      filename: gzipName,
+      data: gzipBuffer
     });
   });
   
