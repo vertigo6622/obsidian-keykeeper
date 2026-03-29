@@ -5,8 +5,8 @@ const auth = require('./auth');
 const crypto = require('crypto');
 
 const PRICES_USD_CENTS = {
-  pro: 6000,
-  commercial: 20000
+  pro: 1,
+  commercial: 200
 };
 
 const TOLERANCE = {
@@ -31,7 +31,7 @@ function formatAmount(amount, currency) {
   if (currency === 'XMR') {
     return (Number(amount) / 1e6).toFixed(6);
   }
-  return (Number(amount) / 1e2).toFixed(8);
+  return (Number(amount) / 1e8).toFixed(8);
 }
 
 async function createTransaction(userId, currency, licenseType, hwid, stubMac = null) {
@@ -61,8 +61,8 @@ async function createTransaction(userId, currency, licenseType, hwid, stubMac = 
       const amountXMR = usdPriceCents / rate;
       amountUnits = BigInt(Math.round(amountXMR * 1e6));
     } else {
-      const amountLTC = usdPriceCents / rate;
-      amountUnits = BigInt(Math.round(amountLTC * 1e2));
+    const amountLTC = usdPriceCents / rate;
+    amountUnits = BigInt(Math.round(amountLTC * 1e8));
     }
     
     const amountDisplay = formatAmount(amountUnits, currency);
@@ -91,12 +91,15 @@ async function createTransaction(userId, currency, licenseType, hwid, stubMac = 
 
 async function activateLicense(transactionId) {
   try {
+    const lockStmt = db.prepare('UPDATE transactions SET status = ? WHERE id = ? AND status = ?');
+    const lockResult = lockStmt.run('activating', transactionId, 'pending');
+    
+    if (lockResult.changes === 0) {
+      return { success: false, error: 'Transaction already processed' };
+    }
+    
     const txStmt = db.prepare('SELECT * FROM transactions WHERE id = ?');
     const transaction = txStmt.get(transactionId);
-    
-    if (!transaction || transaction.status !== 'pending') {
-      return { success: false, error: 'Transaction not found or already processed' };
-    }
     
     const licenseId = auth.createLicense(transaction.user_id, transaction.license_type, transaction.hwid, transaction.stub_mac);
     
@@ -205,12 +208,6 @@ function getTransactionById(id) {
 }
 
 function getUserBalance(userId) {
-  const purchases = db.prepare(`
-    SELECT currency, SUM(CAST(amount AS REAL)) as total FROM transactions
-    WHERE user_id = ? AND type = 'purchase' AND status = 'completed'
-    GROUP BY currency
-  `).all(userId);
-  
   const withdrawals = db.prepare(`
     SELECT currency, SUM(CAST(amount AS REAL)) as total FROM transactions
     WHERE user_id = ? AND type = 'withdraw' AND status = 'completed'
@@ -219,11 +216,6 @@ function getUserBalance(userId) {
   
   let xmrBalance = 0;
   let ltcBalance = 0;
-  
-  purchases.forEach(p => {
-    if (p.currency === 'XMR') xmrBalance += p.total || 0;
-    if (p.currency === 'LTC') ltcBalance += p.total || 0;
-  });
   
   withdrawals.forEach(w => {
     if (w.currency === 'XMR') xmrBalance -= w.total || 0;
@@ -274,6 +266,8 @@ async function checkPendingPayments() {
       try {
         let confirmed = false;
         
+        let actualConfirmations = 0;
+        
         if (tx.currency === 'XMR') {
           const balance = await wallet.getXMRBalanceByAddress(tx.address);
           console.log('XMR check:', tx.address, 'balance:', balance, 'needed:', tx.amount);
@@ -282,6 +276,7 @@ async function checkPendingPayments() {
           const tolerance = BigInt(TOLERANCE.XMR);
           if (balancePiconero >= neededPiconero - tolerance && balancePiconero <= neededPiconero + tolerance * 10n) {
             confirmed = true;
+            actualConfirmations = await wallet.getXMRTransactionConfirmations(tx.address);
           }
         } else if (tx.currency === 'LTC') {
           const balance = await wallet.getLTCBalanceByAddress(tx.address);
@@ -291,30 +286,35 @@ async function checkPendingPayments() {
           const tolerance = BigInt(TOLERANCE.LTC);
           if (balanceSatoshis >= neededSatoshis - tolerance && balanceSatoshis <= neededSatoshis + tolerance * 10n) {
             confirmed = true;
+            actualConfirmations = await wallet.getLTCTransactionConfirmations(tx.address);
           }
         }
         
         if (confirmed) {
-          const newConfirmations = (tx.confirmations || 0) + 1;
-          
           if (!tx.detected_at) {
-            db.prepare('UPDATE transactions SET detected_at = datetime(\'now\'), confirmations = ? WHERE id = ?').run(newConfirmations, tx.id);
+            db.prepare('UPDATE transactions SET detected_at = datetime(\'now\'), confirmations = ? WHERE id = ?').run(actualConfirmations, tx.id);
             
             if (io) {
               io.to('user_' + tx.user_id).emit('tx:detected', {
                 transactionId: tx.id,
                 tx_id: tx.tx_id,
                 currency: tx.currency,
-                amount: tx.amount
+                amount: tx.amount,
+                confirmations: actualConfirmations
               });
             }
-            console.log('Payment detected for transaction:', tx.id, 'confirmations:', newConfirmations);
+            console.log('Payment detected for transaction:', tx.id, 'confirmations:', actualConfirmations);
           } else {
-            db.prepare('UPDATE transactions SET confirmations = ? WHERE id = ?').run(newConfirmations, tx.id);
-            console.log('Transaction', tx.id, 'confirmations:', newConfirmations);
+            db.prepare('UPDATE transactions SET confirmations = ? WHERE id = ?').run(actualConfirmations, tx.id);
+            console.log('Transaction', tx.id, 'confirmations:', actualConfirmations);
           }
           
-          if (newConfirmations >= 10) {
+          const txCheck = db.prepare('SELECT status, confirmations FROM transactions WHERE id = ?').get(tx.id);
+          
+          if (txCheck.status !== 'completed' && actualConfirmations >= 10 && tx.currency === 'XMR') {
+            console.log('Payment confirmed for transaction:', tx.id);
+            await activateLicense(tx.id);
+          } else if (txCheck.status !== 'completed' && actualConfirmations >= 6 && tx.currency === 'LTC') {
             console.log('Payment confirmed for transaction:', tx.id);
             await activateLicense(tx.id);
           }
@@ -351,6 +351,17 @@ function cleanupOldXMRTransactions() {
   return result.changes;
 }
 
+function getPendingTransaction(userId) {
+  const stmt = db.prepare(`
+    SELECT id, currency, amount, address, status, expires_at
+    FROM transactions 
+    WHERE user_id = ? AND type = 'purchase' AND status = 'pending' 
+    AND expires_at > datetime('now')
+    ORDER BY created_at DESC LIMIT 1
+  `);
+  return stmt.get(userId);
+}
+
 module.exports = {
   setSocketIO,
   createTransaction,
@@ -359,6 +370,7 @@ module.exports = {
   getTransactionsByUserId,
   getTransactionById,
   getUserBalance,
+  getPendingTransaction,
   updateTransactionStatus,
   activateLicense,
   checkPendingPayments,

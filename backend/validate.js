@@ -1,19 +1,14 @@
-function sanitizeEmail(email) {
-  if (!email || typeof email !== 'string') return null;
-  return email.trim().toLowerCase().substring(0, 255);
-}
-
-function isValidEmail(email) {
-  const sanitized = sanitizeEmail(email);
-  if (!sanitized) return false;
-  const emailRegex = /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/;
-  return emailRegex.test(sanitized);
-}
-
 function sanitizePassword(password) {
   if (!password || typeof password !== 'string') return null;
   const cleaned = password.replace(/\x00/g, '');
   if (cleaned.length < 8 || cleaned.length > 128) return null;
+  return cleaned;
+}
+
+function sanitizeAccountNumber(accountNumber) {
+  if (!accountNumber || typeof accountNumber !== 'string') return null;
+  const cleaned = accountNumber.replace(/\D/g, '');
+  if (cleaned.length !== 12) return null;
   return cleaned;
 }
 
@@ -99,10 +94,9 @@ function sanitizeBoolean(value) {
 }
 
 module.exports = {
-  sanitizeEmail,
-  isValidEmail,
   sanitizePassword,
   sanitizeString,
+  sanitizeAccountNumber,
   sanitizeLicenseId,
   sanitizeHwid,
   sanitizeAddress,

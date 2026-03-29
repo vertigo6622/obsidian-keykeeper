@@ -58,11 +58,22 @@ async function moneroRPC(method, params = {}) {
   return data.result;
 }
 
+const ELECTRUM_LTC_USER = 'user';
+const ELECTRUM_LTC_PASS = 'password';
+
 async function electrumRPC(method, params = {}) {
   const response = await fetch(ELECTRUM_LTC_URL, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ id: '0', method, params })
+    headers: { 
+      'Content-Type': 'application/json',
+      'Authorization': 'Basic ' + Buffer.from(ELECTRUM_LTC_USER + ':' + ELECTRUM_LTC_PASS).toString('base64')
+    },
+    body: JSON.stringify({
+      jsonrpc: '2.0',
+      id: 1,
+      method,
+      params
+    })
   });
   const data = await response.json();
   return data.result;
@@ -83,10 +94,10 @@ async function generateXMRAddress() {
 
 async function generateLTCAddress() {
   try {
-    const result = await electrumRPC('create_address', { wallet_id: 'main' });
+    const result = await electrumRPC('add_request', { amount: 0 });
     return {
       address: result.address,
-      wallet_id: result.wallet_id
+      id: result.id
     };
   } catch (error) {
     console.error('LTC address generation error:', error);
@@ -106,8 +117,8 @@ async function getXMRBalance() {
 
 async function getLTCBalance() {
   try {
-    const result = await electrumRPC('get_balance', { wallet_id: 'main' });
-    return result.confirmed;
+    const result = await electrumRPC('getbalance', {});
+    return result.confirmed || 0;
   } catch (error) {
     console.error('LTC balance error:', error);
     return 0;
@@ -133,10 +144,56 @@ async function getXMRBalanceByAddress(address) {
   }
 }
 
+async function getXMRTransactionConfirmations(address) {
+  try {
+    const result = await moneroRPC('get_transfers', {
+      in: true,
+      pending: true,
+      account_index: 0
+    });
+    
+    const pending = result.pending || [];
+    const incoming = result.in || [];
+    
+    for (const tx of pending) {
+      if (tx.address === address) {
+        return 0;
+      }
+    }
+    
+    for (const tx of incoming) {
+      if (tx.address === address) {
+        return tx.confirmations || 0;
+      }
+    }
+    
+    return 0;
+  } catch (error) {
+    console.error('XMR confirmations error:', error);
+    return 0;
+  }
+}
+
+async function getLTCTransactionConfirmations(address) {
+  try {
+    const info = await electrumRPC('getinfo', {});
+    const currentHeight = info.height || info.blockchain_height || 0;
+    const history = await electrumRPC('getaddresshistory', { address: address });
+    if (!history || history.length === 0) return 0;
+    if (history[0].height === 0 || history[0].height === -1) {
+      return 0;
+    }
+    return Math.max(0, currentHeight - history[0].height + 1);
+  } catch (error) {
+    console.error('LTC confirmations error:', error);
+    return 0;
+  }
+}
+
 async function getLTCBalanceByAddress(address) {
   try {
-    const result = await electrumRPC('get_address_balance', { address: address });
-    return result.confirmed / 1e8;
+    const result = await electrumRPC('getaddressbalance', { address: address });
+    return result.confirmed || 0;
   } catch (error) {
     console.error('LTC balance by address error:', error);
     return 0;
@@ -150,5 +207,7 @@ module.exports = {
   getLTCBalance,
   getXMRBalanceByAddress,
   getLTCBalanceByAddress,
-  getExchangeRates
+  getExchangeRates,
+  getXMRTransactionConfirmations,
+  getLTCTransactionConfirmations
 };

@@ -4,6 +4,7 @@ const crypto = require('crypto');
 const validate = require('./validate');
 
 const RATE_LIMIT_HOURS = 1;
+const REGISTRATION_RATE_LIMIT = 5;
 const LOGIN_RATE_LIMIT = 30;
 const FAILED_ATTEMPTS_LIMIT = 5;
 const SPECK_ROUNDS = 34;
@@ -155,8 +156,24 @@ function verifyHwidIntegrity(licenseId, sum, cpu, disk, mac, ram, callback) {
 }
 
 function generateAccountNumber() {
-  const bytes = crypto.randomBytes(4);
-  return (1000000 + (bytes.readUInt32BE(0) % 9000000)).toString();
+  const maxAttempts = 10;
+  for (let i = 0; i < maxAttempts; i++) {
+    const bytes = crypto.randomBytes(12);
+    let result = '';
+    for (let j = 0; j < 12; j++) {
+      result += String(bytes[j] % 10);
+    }
+    // Ensure first digit is not 0
+    if (result[0] === '0') {
+      result = String(Math.floor(Math.random() * 9) + 1) + result.slice(1);
+    }
+    // Check if already exists
+    const existing = db.prepare('SELECT id FROM users WHERE account_number = ?').get(result);
+    if (!existing) {
+      return result;
+    }
+  }
+  throw new Error('Failed to generate unique account number after ' + maxAttempts + ' attempts');
 }
 
 function generateLicenseId() {
@@ -179,13 +196,18 @@ function generateLicenseId() {
   return getChunk(0, 8) + '-' + getChunk(8, 4) + '-' + getChunk(12, 4) + '-' + getChunk(16, 4) + '-' + getChunk(20, 12);
 }
 
+function getUserByAccountNumber(accountNumber) {
+  const stmt = db.prepare(`SELECT id, account_number, password_hash, hwid, created_at, last_login FROM users WHERE account_number = ?`);
+  return stmt.get(accountNumber);
+}
+
 function isRateLimited(ip) {
   const stmt = db.prepare(`
     SELECT COUNT(*) as count FROM register_rate_limit 
     WHERE ip = ? AND attempted_at > datetime('now', '-${RATE_LIMIT_HOURS} hour')
   `);
   const result = stmt.get(ip);
-  return result.count > 0;
+  return result.count >= REGISTRATION_RATE_LIMIT;
 }
 
 function addRateLimitEntry(ip) {
@@ -267,27 +289,18 @@ async function verifyPassword(password, hash) {
   return bcrypt.compare(password, hash);
 }
 
-function getUserByEmail(email) {
-  const sanitizedEmail = validate.sanitizeEmail(email);
-  if (!sanitizedEmail) return null;
-  const stmt = db.prepare(`SELECT * FROM users WHERE email = ?`);
-  return stmt.get(sanitizedEmail);
-}
-
 function getUserById(id) {
-  const stmt = db.prepare(`SELECT id, email, account_number, hwid, created_at, last_login FROM users WHERE id = ?`);
+  const stmt = db.prepare(`SELECT id, account_number, hwid, created_at, last_login FROM users WHERE id = ?`);
   return stmt.get(id);
 }
 
-function createUser(email, passwordHash, hwid = null) {
+function createUser(passwordHash, hwid = null) {
   const accountNumber = generateAccountNumber();
-  
   const stmt = db.prepare(`
-    INSERT INTO users (email, password_hash, account_number, hwid)
-    VALUES (?, ?, ?, ?)
+    INSERT INTO users (password_hash, account_number, hwid)
+    VALUES (?, ?, ?)
   `);
-  const result = stmt.run(email, passwordHash, accountNumber, hwid);
-  
+  const result = stmt.run(passwordHash, accountNumber, hwid);
   return { id: result.lastInsertRowid, accountNumber };
 }
 
@@ -306,7 +319,7 @@ function getLicenseByUserId(userId) {
 
 function getLicenseById(licenseId) {
   const stmt = db.prepare(`
-    SELECT l.license_id, l.type, l.expires_at, l.user_id, l.hwid as license_hwid, l.stub_mac, l.integrity, u.email, u.account_number, u.hwid as user_hwid, u.speck_key
+    SELECT l.license_id, l.type, l.expires_at, l.user_id, l.hwid as license_hwid, l.stub_mac, l.integrity, u.account_number, u.hwid as user_hwid, u.speck_key
     FROM licenses l
     JOIN users u ON l.user_id = u.id
     WHERE l.license_id = ?
@@ -389,18 +402,6 @@ function changePassword(userId, oldPassword, newPassword) {
   return { success: true };
 }
 
-function changeEmail(userId, oldPassword, newEmail) {
-  const userWithHash = db.prepare(`SELECT password_hash FROM users WHERE id = ?`).get(userId);
-  const valid = bcrypt.compareSync(oldPassword, userWithHash.password_hash);
-  if (!valid) return { success: false, error: 'Invalid password' };
-  
-  const existing = getUserByEmail(newEmail);
-  if (existing) return { success: false, error: 'Email already in use' };
-  
-  db.prepare(`UPDATE users SET email = ? WHERE id = ?`).run(newEmail, userId);
-  return { success: true };
-}
-
 function deleteAccount(userId, password) {
   const userWithHash = db.prepare(`SELECT password_hash FROM users WHERE id = ?`).get(userId);
   const valid = bcrypt.compareSync(password, userWithHash.password_hash);
@@ -411,16 +412,6 @@ function deleteAccount(userId, password) {
   db.prepare(`DELETE FROM sessions WHERE user_id = ?`).run(userId);
   db.prepare(`DELETE FROM users WHERE id = ?`).run(userId);
   
-  return { success: true };
-}
-
-function getNotifications(userId) {
-  const user = db.prepare(`SELECT notifications_enabled FROM users WHERE id = ?`).get(userId);
-  return user ? user.notifications_enabled === 1 : true;
-}
-
-function setNotifications(userId, enabled) {
-  db.prepare(`UPDATE users SET notifications_enabled = ? WHERE id = ?`).run(enabled ? 1 : 0, userId);
   return { success: true };
 }
 
@@ -489,7 +480,7 @@ function computeHwidFromMachineInfo(machineInfo, license) {
 
 function getUserByLicenseId(licenseId) {
   const stmt = db.prepare(`
-    SELECT u.id, u.email, u.account_number, u.speck_key 
+    SELECT u.id, u.account_number, u.speck_key 
     FROM users u
     JOIN licenses l ON u.id = l.user_id
     WHERE l.license_id = ?
@@ -508,7 +499,6 @@ module.exports = {
   isAccountLocked,
   hashPassword,
   verifyPassword,
-  getUserByEmail,
   getUserById,
   createUser,
   updateLastLogin,
@@ -520,10 +510,7 @@ module.exports = {
   relinkLicense,
   logProductVerification,
   changePassword,
-  changeEmail,
   deleteAccount,
-  getNotifications,
-  setNotifications,
   getUserSessions,
   cleanupOldSessions,
   verifyHwidIntegrity,
@@ -531,6 +518,7 @@ module.exports = {
   updateUserSpeckKey,
   computeHwidFromMachineInfo,
   getUserByLicenseId,
+  getUserByAccountNumber,
   isRelinkRateLimited,
   addRelinkAttempt,
   updateLicenseDownloadFilename,
@@ -544,7 +532,9 @@ module.exports = {
   suspendAccount,
   isHwidVerifyRateLimited,
   addHwidVerifyAttempt,
-  cleanupOldHwidVerifyRateLimits
+  cleanupOldHwidVerifyRateLimits,
+  generateAuthToken,
+  validateAuthToken
 };
 
 const RELINK_RATE_LIMIT = 10;
@@ -563,7 +553,7 @@ function addRelinkAttempt(ip) {
   stmt.run(ip);
 }
 
-const TX_CREATE_RATE_LIMIT = 10;
+const TX_CREATE_RATE_LIMIT = 1;
 
 function isTxCreateRateLimited(userId, ip) {
   const stmt = db.prepare(`
@@ -601,4 +591,25 @@ function addHwidVerifyAttempt(userId, ip) {
 
 function cleanupOldHwidVerifyRateLimits() {
   db.prepare(`DELETE FROM hwid_verify_rate_limit WHERE attempted_at < datetime('now', '-1 hour')`).run();
+}
+
+function generateAuthToken(userId, existingToken = null) {
+  const token = existingToken || crypto.randomBytes(32).toString('hex');
+  const stmt = db.prepare(`INSERT OR REPLACE INTO auth_tokens (user_id, token) VALUES (?, ?)`);
+  stmt.run(userId, token);
+  return token;
+}
+
+function validateAuthToken(token) {
+  if (!token) return null;
+  const stmt = db.prepare(`
+    SELECT user_id FROM auth_tokens WHERE token = ?
+  `);
+  const result = stmt.get(token);
+  return result ? result.user_id : null;
+}
+
+function getUserById(userId) {
+  const stmt = db.prepare(`SELECT id, account_number, hwid, created_at, last_login FROM users WHERE id = ?`);
+  return stmt.get(userId);
 }

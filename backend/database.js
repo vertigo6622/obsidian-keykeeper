@@ -9,12 +9,10 @@ db.pragma('journal_mode = WAL');
 db.exec(`
   CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    email TEXT UNIQUE NOT NULL,
     password_hash TEXT NOT NULL,
     account_number TEXT UNIQUE NOT NULL,
     hwid TEXT,
     speck_key TEXT,
-    notifications_enabled INTEGER DEFAULT 1,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     last_login DATETIME,
     locked_at DATETIME,
@@ -38,6 +36,7 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS transactions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER REFERENCES users(id),
+    license_id TEXT,
     type TEXT NOT NULL,
     currency TEXT NOT NULL,
     amount REAL NOT NULL,
@@ -80,6 +79,14 @@ db.exec(`
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     ip TEXT NOT NULL,
     attempted_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE TABLE IF NOT EXISTS auth_tokens (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER REFERENCES users(id),
+    token TEXT UNIQUE NOT NULL,
+    expires_at DATETIME,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
   CREATE TABLE IF NOT EXISTS tx_create_rate_limit (

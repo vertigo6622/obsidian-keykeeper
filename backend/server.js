@@ -11,6 +11,7 @@ const tx = require('./transactions');
 const validate = require('./validate');
 const wallet = require('./wallet');
 const packer = require('./packer-bridge');
+const pgp = require('./pgp')
 
 const app = express();
 const server = http.createServer(app);
@@ -55,75 +56,6 @@ io.use((socket, next) => {
 
 app.get('/', (req, res) => {
   res.json({ status: 'ok', service: 'obsidian-keykeeper' });
-});
-
-app.post('/api/register', async (req, res) => {
-  try {
-    const { email, password, hwid } = req.body;
-    
-    if (!email || !password) {
-      return res.json({ success: false, error: 'Email and password required' });
-    }
-    
-    const ip = req.ip || req.connection.remoteAddress;
-    
-    if (auth.isRateLimited(ip)) {
-      return res.json({ success: false, error: 'Rate limited. Try again later.' });
-    }
-    
-    const existingUser = auth.getUserByEmail(email);
-    if (existingUser) {
-      return res.json({ success: false, error: 'Email already registered' });
-    }
-    
-    const passwordHash = await auth.hashPassword(password);
-    const user = auth.createUser(email, passwordHash, hwid);
-    
-    auth.addRateLimitEntry(ip);
-    
-    req.session.userId = user.id;
-    req.session.save();
-    
-    res.json({ success: true });
-  } catch (error) {
-    console.error('Register error:', error);
-    res.json({ success: false, error: 'Registration failed' });
-  }
-});
-
-app.post('/api/login', async (req, res) => {
-  try {
-    const { email, password } = req.body;
-    
-    if (!email || !password) {
-      return res.json({ success: false, error: 'Email and password required' });
-    }
-    
-    const user = auth.getUserByEmail(email);
-    if (!user) {
-      return res.json({ success: false, error: 'Invalid credentials' });
-    }
-    
-    const valid = await auth.verifyPassword(password, user.password_hash);
-    if (!valid) {
-      return res.json({ success: false, error: 'Invalid credentials' });
-    }
-    
-    auth.updateLastLogin(user.id);
-    
-    req.session.userId = user.id;
-    req.session.save();
-    
-    res.json({ success: true });
-  } catch (error) {
-    console.error('Login error:', error);
-    res.json({ success: false, error: 'Login failed' });
-  }
-});
-
-app.post('/api/logout', (req, res) => {
-  req.session.destroy();
-  res.json({ success: true });
 });
 
 app.post('/api/product/verify', async (req, res) => {
@@ -246,18 +178,13 @@ io.on('connection', (socket) => {
     socket.join('user_' + socket.request.session.userId);
     console.log('Socket joined room: user_' + socket.request.session.userId);
   }
-  
+
   socket.on('auth:register', async (data, callback) => {
     try {
-      const { email, password, hwid } = data;
+      const { password, hwid } = data;
       const ip = socket.handshake.address || 'unknown';
       
-      const sanitizedEmail = validate.sanitizeEmail(email);
       const sanitizedPassword = validate.sanitizePassword(password);
-      
-      if (!sanitizedEmail || !validate.isValidEmail(sanitizedEmail)) {
-        return callback({ success: false, error: 'Invalid email format' });
-      }
       
       if (!sanitizedPassword) {
         return callback({ success: false, error: 'Password must be 8-128 characters' });
@@ -267,13 +194,8 @@ io.on('connection', (socket) => {
         return callback({ success: false, error: 'Rate limited. Try again later.' });
       }
       
-      const existingUser = auth.getUserByEmail(sanitizedEmail);
-      if (existingUser) {
-        return callback({ success: false, error: 'Email already registered' });
-      }
-      
       const passwordHash = await auth.hashPassword(sanitizedPassword);
-      const user = auth.createUser(sanitizedEmail, passwordHash, hwid);
+      const user = auth.createUser(passwordHash, hwid);
       
       auth.addRateLimitEntry(ip);
       
@@ -281,7 +203,7 @@ io.on('connection', (socket) => {
       socket.request.session.save();
       socket.join('user_' + user.id);
       
-      callback({ success: true });
+      callback({ success: true, accountNumber: user.accountNumber });
     } catch (error) {
       console.error('Register error:', error);
       callback({ success: false, error: 'Registration failed' });
@@ -290,17 +212,17 @@ io.on('connection', (socket) => {
   
   socket.on('auth:login', async (data, callback) => {
     try {
-      const { email, password } = data;
+      const { account_number, password } = data;
       
-      const sanitizedEmail = validate.sanitizeEmail(email);
+      const sanitizedAccountNumber = validate.sanitizeAccountNumber(account_number);
       const sanitizedPassword = validate.sanitizePassword(password);
       const ip = socket.handshake.address || 'unknown';
       
-      console.log('Login attempt - email:', sanitizedEmail, 'password length:', password ? password.length : 0);
+      console.log('Login attempt - account_number:', sanitizedAccountNumber);
       
-      if (!sanitizedEmail || !validate.isValidEmail(sanitizedEmail)) {
-        console.log('Login failed: invalid email');
-        return callback({ success: false, error: 'Invalid email format' });
+      if (!sanitizedAccountNumber) {
+        console.log('Login failed: invalid account number');
+        return callback({ success: false, error: 'Invalid account number format' });
       }
       
       if (!sanitizedPassword) {
@@ -315,7 +237,7 @@ io.on('connection', (socket) => {
       
       auth.addLoginAttempt(ip);
       
-      const user = auth.getUserByEmail(sanitizedEmail);
+      const user = auth.getUserByAccountNumber(sanitizedAccountNumber);
       if (!user) {
         return callback({ success: false, error: 'Invalid credentials' });
       }
@@ -325,7 +247,7 @@ io.on('connection', (socket) => {
       }
       
       if (auth.isAccountSuspended(user.id)) {
-        return callback({ success: false, error: 'account suspended. contact support.' });
+        return callback({ success: false, error: 'Account suspended. contact support.' });
       }
       
       const valid = await auth.verifyPassword(sanitizedPassword, user.password_hash);
@@ -363,15 +285,16 @@ io.on('connection', (socket) => {
     const user = auth.getUserById(userId);
     const license = auth.getLicenseByUserId(userId);
     const balance = tx.getUserBalance(userId);
+    const pendingTx = tx.getPendingTransaction(userId);
     
     callback({
       account_number: user.account_number,
-      email: user.email,
       license: license ? license.type : 'none',
       license_id: license ? license.license_id : null,
       hwid: user.hwid,
       license_status: license && new Date(license.expires_at) > new Date() ? 'active' : 'expired',
-      balance
+      balance,
+      pending_transaction: pendingTx || null
     });
   });
   
@@ -417,7 +340,6 @@ io.on('connection', (socket) => {
         callback({
           valid: true,
           type: result.type,
-          email: license.email,
           account_number: license.account_number,
           hwid: license.license_hwid
         });
@@ -700,28 +622,6 @@ callback({ canRelink: auth.canRelink(sanitizedLicenseId) });
     callback(result);
   });
   
-  socket.on('user:changeEmail', (data, callback) => {
-    const userId = socket.request.session.userId;
-    if (!userId) {
-      return callback({ error: 'Not authenticated' });
-    }
-    
-    const { oldPassword, newEmail } = data;
-    const sanitizedOldPassword = validate.sanitizePassword(oldPassword);
-    const sanitizedNewEmail = validate.sanitizeEmail(newEmail);
-    
-    if (!sanitizedOldPassword) {
-      return callback({ error: 'Invalid password' });
-    }
-    
-    if (!sanitizedNewEmail || !validate.isValidEmail(sanitizedNewEmail)) {
-      return callback({ error: 'Invalid email format' });
-    }
-    
-    const result = auth.changeEmail(userId, sanitizedOldPassword, sanitizedNewEmail);
-    callback(result);
-  });
-  
   socket.on('user:deleteAccount', (data, callback) => {
     const userId = socket.request.session.userId;
     if (!userId) {
@@ -740,26 +640,6 @@ callback({ canRelink: auth.canRelink(sanitizedLicenseId) });
       socket.request.session.destroy();
     }
     callback(result);
-  });
-  
-  socket.on('user:getNotifications', (data, callback) => {
-    const userId = socket.request.session.userId;
-    if (!userId) {
-      return callback({ error: 'Not authenticated' });
-    }
-    
-    callback({ enabled: auth.getNotifications(userId) });
-  });
-  
-  socket.on('user:setNotifications', (data, callback) => {
-    const userId = socket.request.session.userId;
-    if (!userId) {
-      return callback({ error: 'Not authenticated' });
-    }
-    
-    const { enabled } = data;
-    auth.setNotifications(userId, enabled);
-    callback({ success: true });
   });
   
   socket.on('user:getSessions', (data, callback) => {
@@ -822,6 +702,7 @@ app.get('/api/downloads/:filename', (req, res) => {
 server.listen(PORT, '127.0.0.1', () => {
   console.log('Obsidian backend running on port ' + PORT);
   console.log('PGP key path: ' + (process.env.PGP_KEY_PATH || '/srv/pgp/key.asc'));
+  pgp.loadPrivateKey();
   
   auth.cleanupOldSessions();
   setInterval(() => {
