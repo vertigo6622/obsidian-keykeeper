@@ -11,10 +11,10 @@ const BASE_BINARIES = {
 };
 
 function generateRandomFilename() {
-  return 'obisidan_pro_' + crypto.randomBytes(6).toString('hex');
+  return 'obisidan.pro.' + crypto.randomBytes(7).toString('hex');
 }
 
-function createPackedBinary(licenseType, hwid, callback) {
+function createPackedBinary(licenseType, hwid, licenseId, callback) {
   const basePath = BASE_BINARIES[licenseType];
   
   if (!basePath) {
@@ -25,13 +25,14 @@ function createPackedBinary(licenseType, hwid, callback) {
     return callback(new Error('Base binary not found'));
   }
   
-  const packerPath = path.join(__dirname, 'packer', 'packer');
-  const outputDir = '/tmp/packer-output';
+  const packerPath = path.join('srv', 'packing', 'obsidian.internal.exe');
+  const outputDir = '/tmp/packer-output-' + crypto.randomBytes(12).toString('hex'); 
   
   if (!fs.existsSync(outputDir)) {
     fs.mkdirSync(outputDir, { recursive: true });
   }
 
+  const randomName = generateRandomFilename();
   const outputPath = path.join(outputDir, randomName + '.exe');
   
   const args = ['--compress', '--ultra', '--fix'];
@@ -42,6 +43,12 @@ function createPackedBinary(licenseType, hwid, callback) {
       return callback(new Error('Invalid HWID format'));
     }
     args.push('--link-to-hwid', sanitizedHwid);
+  } else if (licenseId) {
+    const sanitizedLicenseId = validate.sanitizeLicenseId(licenseId);
+    if (!sanitizedLicenseId) {
+      return callback(new Error('Invalid LicenseId'));
+    }
+    args.push('--link-license', sanitizedLicenseId);
   }
   args.push(basePath, outputPath);
   
@@ -94,22 +101,25 @@ function createPackedBinary(licenseType, hwid, callback) {
     
     const binaryData = fs.readFileSync(outputPath);
     fs.unlink(outputPath, () => {});
-
-    const randomName = generateRandomFilename();
-    const gzipName = randomName + '.gz';
-    const gzipBuffer = zlib.gzipSync(binaryData);
+    fs.unlink(outputDir, () => {});
     
     callback(null, {
       mac: mac,
       key: key,
       hwid: null,
       integrity: integrity,
-      filename: gzipName,
-      data: gzipBuffer
+      filename: randomName,
+      data: binaryData
     });
   });
   
   proc.on('error', (err) => {
+    if (fs.existsSync(outputPath)) {
+      fs.unlink(outputPath, () => {});
+      fs.unlink(outputDir, () => {});
+    } else if (fs.existsSync(outputDir)) {
+      fs.unlink(outputDir, () => {});
+    }
     callback(err);
   });
 }
