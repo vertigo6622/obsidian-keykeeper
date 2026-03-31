@@ -81,8 +81,35 @@ function sanitizeLicenseType(type) {
 }
 
 function sanitizeAmount(amount) {
+  if (typeof amount === 'string') {
+    if (!/^\d+(\.\d+)?$/.test(amount.trim())) return null;
+  }
   const num = parseFloat(amount);
-  if (isNaN(num) || num <= 0 || num > 100000) return null;
+  if (isNaN(num) || num <= 0 || num > 10000) return null;
+  if (num !== parseFloat(num.toFixed(8))) return null;
+  return num;
+}
+
+function sanitizeWithdrawAmount(amount, currency) {
+  const num = sanitizeAmount(amount);
+  if (!num) return null;
+  const maxAmounts = { XMR: 1, LTC: 5 };
+  if (num > (maxAmounts[currency] || 10)) return null;
+  return num;
+}
+
+function validateWithdrawAddress(address, currency) {
+  if (!address || typeof address !== 'string') return false;
+  const clean = address.trim().replace(/[\x00-\x1F\x7F]/g, '');
+  if (currency === 'XMR') return isValidXMRAddress(clean);
+  if (currency === 'LTC') return isValidLTCAddress(clean);
+  return false;
+}
+
+function sanitizeDepositAmount(amount) {
+  const num = sanitizeAmount(amount);
+  if (!num) return null;
+  if (num < 0.01) return null;
   return num;
 }
 
@@ -105,5 +132,8 @@ module.exports = {
   sanitizeCurrency,
   sanitizeLicenseType,
   sanitizeAmount,
+  sanitizeWithdrawAmount,
+  validateWithdrawAddress,
+  sanitizeDepositAmount,
   sanitizeBoolean
 };

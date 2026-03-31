@@ -395,7 +395,7 @@ async function changePassword(userId, oldPassword, newPassword) {
 
 async function deleteAccount(userId, password) {
   const userWithHash = db.prepare(`SELECT password_hash FROM users WHERE id = ?`).get(userId);
-  const valid = await bcrypt.compare(oldPassword, userWithHash.password_hash);
+  const valid = await bcrypt.compare(password, userWithHash.password_hash);
   if (!valid) return { success: false, error: 'Invalid password' };
   
   db.prepare(`DELETE FROM transactions WHERE user_id = ?`).run(userId);
@@ -522,6 +522,10 @@ module.exports = {
   isHwidVerifyRateLimited,
   addHwidVerifyAttempt,
   cleanupOldHwidVerifyRateLimits,
+  isWithdrawRateLimited,
+  addWithdrawAttempt,
+  cleanupOldWithdrawRateLimits,
+  getAccountStanding,
   generateAuthToken,
   validateAuthToken
 };
@@ -580,6 +584,37 @@ function addHwidVerifyAttempt(userId, ip) {
 
 function cleanupOldHwidVerifyRateLimits() {
   db.prepare(`DELETE FROM hwid_verify_rate_limit WHERE attempted_at < datetime('now', '-1 hour')`).run();
+}
+
+const WITHDRAW_RATE_LIMIT = 5;
+
+function isWithdrawRateLimited(userId, ip) {
+  const stmt = db.prepare(`
+    SELECT COUNT(*) as count FROM withdraw_rate_limit 
+    WHERE user_id = ? AND attempted_at > datetime('now', '-1 hour')
+  `);
+  const result = stmt.get(userId);
+  return result.count >= WITHDRAW_RATE_LIMIT;
+}
+
+function addWithdrawAttempt(userId, ip, currency) {
+  const stmt = db.prepare(`INSERT INTO withdraw_rate_limit (user_id, ip, currency) VALUES (?, ?, ?)`);
+  stmt.run(userId, ip, currency);
+}
+
+function cleanupOldWithdrawRateLimits() {
+  db.prepare(`DELETE FROM withdraw_rate_limit WHERE attempted_at < datetime('now', '-1 hour')`).run();
+}
+
+function getAccountStanding(userId) {
+  const user = db.prepare(`SELECT locked_at, suspended, created_at FROM users WHERE id = ?`).get(userId);
+  if (!user) return { exists: false };
+  return {
+    exists: true,
+    locked: user.locked_at !== null,
+    suspended: user.suspended === 1,
+    age: (Date.now() - new Date(user.created_at).getTime()) / (1000 * 60 * 60)
+  };
 }
 
 function generateAuthToken(userId, existingToken = null) {

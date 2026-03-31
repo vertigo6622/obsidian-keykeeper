@@ -17,7 +17,8 @@ const helmet = require('helmet');
 const app = express();
 const server = http.createServer(app);
 
-const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || 'http://localhost:8000,http://127.0.0.1:8000').split(',');
+const MIN_ACCOUNT_AGE_HOURS = 24;
+const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || 'http://localhost:8000,http://127.0.0.1:8000,https://obsidian.st').split(',');
 
 const io = new Server(server, {
   cors: {
@@ -387,6 +388,11 @@ io.on('connection', (socket) => {
       return callback({ error: 'Not authenticated' });
     }
     
+    const standing = auth.getAccountStanding(userId);
+    if (!standing.exists || standing.locked || standing.suspended || standing.created_at < MIN_ACCOUNT_AGE_HOURS) {
+      return callback({ error: 'Account not in good standing' });
+    }
+    
     const ip = socket.handshake.address || 'unknown';
     
     if (auth.isTxCreateRateLimited(userId, ip)) {
@@ -423,6 +429,11 @@ io.on('connection', (socket) => {
       return callback({ error: 'Not authenticated' });
     }
     
+    const standing = auth.getAccountStanding(userId);
+    if (!standing.exists || standing.locked || standing.suspended || standing.created_at < MIN_ACCOUNT_AGE_HOURS) {
+      return callback({ error: 'Account not in good standing' });
+    }
+    
     const ip = socket.handshake.address || 'unknown';
     
     if (auth.isTxCreateRateLimited(userId, ip)) {
@@ -433,13 +444,13 @@ io.on('connection', (socket) => {
       const { currency, amount } = data;
       
       const sanitizedCurrency = validate.sanitizeCurrency(currency);
-      const sanitizedAmount = validate.sanitizeAmount(amount);
+      const sanitizedAmount = validate.sanitizeDepositAmount(amount);
       
       if (!sanitizedCurrency) {
         return callback({ error: 'Invalid currency' });
       }
       
-      if (!sanitizedAmount || sanitizedAmount <= 0) {
+      if (!sanitizedAmount) {
         return callback({ error: 'Invalid amount' });
       }
       
@@ -458,18 +469,25 @@ io.on('connection', (socket) => {
       return callback({ error: 'Not authenticated' });
     }
     
+    const standing = auth.getAccountStanding(userId);
+    if (!standing.exists || standing.locked || standing.suspended || standing.created_at < MIN_ACCOUNT_AGE_HOURS) {
+      return callback({ error: 'Account not in good standing' });
+    }
+    
+    const ip = socket.handshake.address || 'unknown';
+    
     try {
       const { currency, amount, address } = data;
       
       const sanitizedCurrency = validate.sanitizeCurrency(currency);
-      const sanitizedAmount = validate.sanitizeAmount(amount);
+      const sanitizedAmount = validate.sanitizeWithdrawAmount(amount, sanitizedCurrency);
       const sanitizedAddress = validate.sanitizeAddress(address);
       
       if (!sanitizedCurrency) {
         return callback({ error: 'Invalid currency' });
       }
       
-      if (!sanitizedAmount || sanitizedAmount <= 0) {
+      if (!sanitizedAmount) {
         return callback({ error: 'Invalid amount' });
       }
       
@@ -477,16 +495,19 @@ io.on('connection', (socket) => {
         return callback({ error: 'Invalid address' });
       }
       
-      const balance = tx.getUserBalance(userId);
-      const available = sanitizedCurrency === 'XMR' ? balance.xmr : balance.ltc;
+      if (!validate.validateWithdrawAddress(sanitizedAddress, sanitizedCurrency)) {
+        return callback({ error: 'Address does not match selected currency' });
+      }
       
-      if (sanitizedAmount > available) {
-        return callback({ error: 'Insufficient balance' });
+      if (auth.isWithdrawRateLimited(userId, ip)) {
+        return callback({ error: 'Too many withdrawal attempts. Try again later.' });
       }
       
       const transaction = await tx.createWithdrawTransaction(userId, sanitizedCurrency, sanitizedAmount, sanitizedAddress);
       
-      callback({ success: true, tx_id: transaction.tx_id });
+      auth.addWithdrawAttempt(userId, ip, sanitizedCurrency);
+      
+      callback({ success: true, tx_id: transaction.tx_id, tx_hash: transaction.tx_hash });
     } catch (error) {
       console.error('Withdraw error:', error);
       callback({ error: error.message });

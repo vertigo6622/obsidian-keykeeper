@@ -4,20 +4,15 @@ const pgp = require('./pgp');
 const auth = require('./auth');
 const crypto = require('crypto');
 
-const PRICES_USD_CENTS = {
-  // testing price
-  pro: 100,
-  // not yet available
-  commercial: 2000
-};
+const PRICES_USD_CENTS = { pro: 100, commercial: 2000 };
+const TOLERANCE = { XMR: BigInt(100000), LTC: BigInt(10) };
 
-const TOLERANCE = {
-  XMR: BigInt(100000000),
-  LTC: BigInt(10000000)
-};
+const MAX_DAILY_WITHDRAW_USD = 200;
+const MAX_PENDING_DEPOSITS = 2;
+const MIN_ACCOUNT_AGE_HOURS = 24;
 
-const PICONERO_PER_XMR = BigInt(1e12);
-const SATOSHIS_PER_LTC = BigInt(1e8);
+const PICONERO_PER_XMR = 1e12;
+const SATOSHIS_PER_LTC = 1e8;
 
 let io = null;
 
@@ -26,17 +21,14 @@ function setSocketIO(socketIO) {
 }
 
 function generateTransactionId() {
-  return crypto.randomBytes(12).toString('hex').toUpperCase();
+  return crypto.randomBytes(16).toString('hex').toUpperCase();
 }
 
 function formatAmount(amount, currency) {
   if (currency === 'XMR') {
-    return (Number(amount) / 1e12).toFixed(8);
-  } else if (currency === 'LTC') {
-    return (Number(amount) / 1e8).toFixed(8);
-  } else {
-    throw new Error('Unsupported currency');
+    return (Number(amount) / PICONERO_PER_XMR).toFixed(8);
   }
+  return (Number(amount) / SATOSHIS_PER_LTC).toFixed(8);
 }
 
 async function createTransaction(userId, currency, licenseType, hwid, stubMac = null) {
@@ -65,10 +57,10 @@ async function createTransaction(userId, currency, licenseType, hwid, stubMac = 
     let amountUnits;
     if (currency === 'XMR') {
       const amountXMR = usdPrice / rate;
-      amountUnits = BigInt(Math.round(amountXMR * 1e12));
+      amountUnits = BigInt(Math.round(amountXMR * PICONERO_PER_XMR));
     } else {
       const amountLTC = usdPrice / rate;
-      amountUnits = BigInt(Math.round(amountLTC * 1e8));
+      amountUnits = BigInt(Math.round(amountLTC * SATOSHIS_PER_LTC));
     }
     
     const amountDisplay = formatAmount(amountUnits, currency);
@@ -130,6 +122,15 @@ async function activateLicense(transactionId) {
 
 async function createDepositTransaction(userId, currency, amount) {
   try {
+    const pendingCount = db.prepare(`
+      SELECT COUNT(*) as count FROM transactions
+      WHERE user_id = ? AND type = 'deposit' AND status = 'pending'
+    `).get(userId);
+    
+    if (pendingCount.count >= MAX_PENDING_DEPOSITS) {
+      throw new Error('Too many pending deposits');
+    }
+    
     const rates = await wallet.getExchangeRates();
     if (!rates.available) {
       throw new Error('Exchange rates unavailable');
@@ -157,10 +158,10 @@ async function createDepositTransaction(userId, currency, amount) {
     let amountUnits;
     let usdAmountCents;
     if (currency === 'XMR') {
-      amountUnits = BigInt(Math.round(amount * 1e12));
+      amountUnits = BigInt(Math.round(amount * PICONERO_PER_XMR));
       usdAmountCents = BigInt(Math.round(amount * rate * 100));
     } else {
-      amountUnits = BigInt(Math.round(amount * 1e8));
+      amountUnits = BigInt(Math.round(amount * SATOSHIS_PER_LTC));
       usdAmountCents = BigInt(Math.round(amount * rate * 100));
     }
     
@@ -191,16 +192,79 @@ async function createDepositTransaction(userId, currency, amount) {
 }
 
 async function createWithdrawTransaction(userId, currency, amount, address) {
-  const stmt = db.prepare(`
-    INSERT INTO transactions (user_id, type, currency, amount, address, status)
-    VALUES (?, 'withdraw', ?, ?, ?, 'pending')
-  `);
-  const result = stmt.run(userId, currency, amount, address);
+  const balance = getUserBalance(userId);
+  const available = currency === 'XMR' ? balance.xmr : balance.ltc;
   
-  return {
-    id: result.lastInsertRowid,
-    tx_id: generateTransactionId()
-  };
+  if (amount > available) {
+    throw new Error('Insufficient balance');
+  }
+  
+  const rates = wallet.getExchangeRates();
+  if (rates.available) {
+    const rate = currency === 'XMR' ? rates.xmr : rates.ltc;
+    const usdAmount = amount * rate;
+    
+    const dailyWithdrawn = db.prepare(`
+      SELECT COALESCE(SUM(usd_amount), 0) as total FROM transactions
+      WHERE user_id = ? AND type = 'withdraw' AND status = 'completed'
+      AND created_at > datetime('now', '-24 hours')
+    `).get(userId);
+    
+    if (Number(dailyWithdrawn.total) + usdAmount > MAX_DAILY_WITHDRAW_USD) {
+      throw new Error('Daily withdrawal limit exceeded');
+    }
+  }
+  
+  try {
+    let result;
+    if (currency === 'XMR') {
+      result = await wallet.sendXMR(address, amount);
+    } else if (currency === 'LTC') {
+      result = await wallet.sendLTC(address, amount);
+    } else {
+      throw new Error('Unsupported currency');
+    }
+    
+    const existingTx = db.prepare(`SELECT id FROM transactions WHERE tx_hash = ?`).get(result.txHash);
+    if (existingTx) {
+      throw new Error('Transaction already processed');
+    }
+    
+    const stmt = db.prepare(`
+      INSERT INTO transactions (user_id, type, currency, amount, address, tx_hash, status, usd_amount)
+      VALUES (?, 'withdraw', ?, ?, ?, ?, 'completed', 0)
+    `);
+    const txResult = stmt.run(userId, currency, amount, address, result.txHash);
+    
+    const rates = wallet.getExchangeRates();
+    let usdAmount = 0;
+    if (rates.available) {
+      const rate = currency === 'XMR' ? rates.xmr : rates.ltc;
+      usdAmount = amount * rate;
+      db.prepare('UPDATE transactions SET usd_amount = ? WHERE id = ?').run(usdAmount.toFixed(2), txResult.lastInsertRowid);
+    }
+    
+    if (io) {
+      io.to('user_' + userId).emit('tx:withdraw_completed', {
+        transactionId: txResult.lastInsertRowid,
+        currency,
+        amount,
+        txHash: result.txHash,
+        fee: result.fee
+      });
+    }
+    
+    return {
+      id: txResult.lastInsertRowid,
+      tx_id: generateTransactionId(),
+      tx_hash: result.txHash,
+      fee: result.fee,
+      status: 'completed'
+    };
+  } catch (error) {
+    console.error('Withdraw error:', error);
+    throw new Error('Withdrawal failed: ' + error.message);
+  }
 }
 
 function getTransactionsByUserId(userId, limit = 50) {
@@ -268,7 +332,7 @@ function updateTransactionStatus(id, txHash, status) {
 async function checkPendingPayments() {
   try {
     const expiredTxs = db.prepare(`
-      SELECT * FROM transactions WHERE status = 'pending' AND type = 'purchase' AND expires_at < datetime('now')
+      SELECT * FROM transactions WHERE status = 'pending' AND type IN ('purchase', 'deposit') AND expires_at < datetime('now')
     `).all();
     
     for (const tx of expiredTxs) {
@@ -284,7 +348,7 @@ async function checkPendingPayments() {
     }
     
     const pendingTxs = db.prepare(`
-      SELECT * FROM transactions WHERE status = 'pending' AND type = 'purchase' AND expires_at >= datetime('now')
+      SELECT * FROM transactions WHERE status = 'pending' AND type IN ('purchase', 'deposit') AND expires_at >= datetime('now')
     `).all();
     
     if (pendingTxs.length === 0) return;
@@ -303,7 +367,7 @@ async function checkPendingPayments() {
           const balancePiconero = BigInt(Math.round(balance * 1e12));
           const neededPiconero = BigInt(Math.round(parseFloat(tx.amount) * 1e12));
           const tolerance = BigInt(TOLERANCE.XMR);
-          if (balancePiconero >= neededPiconero - tolerance && balancePiconero <= neededPiconero + tolerance * 10n) {
+          if (balancePiconero >= neededPiconero - tolerance && balancePiconero <= neededPiconero + tolerance * 2n) {
             confirmed = true;
             actualConfirmations = await wallet.getXMRTransactionConfirmations(tx.address);
           }
@@ -313,7 +377,7 @@ async function checkPendingPayments() {
           const balanceSatoshis = BigInt(Math.round(balance * 1e8));
           const neededSatoshis = BigInt(Math.round(parseFloat(tx.amount) * 1e8));
           const tolerance = BigInt(TOLERANCE.LTC);
-          if (balanceSatoshis >= neededSatoshis - tolerance && balanceSatoshis <= neededSatoshis + tolerance * 10n) {
+          if (balanceSatoshis >= neededSatoshis - tolerance && balanceSatoshis <= neededSatoshis + tolerance * 2n) {
             confirmed = true;
             actualConfirmations = await wallet.getLTCTransactionConfirmations(tx.address);
           }
@@ -341,11 +405,43 @@ async function checkPendingPayments() {
           const txCheck = db.prepare('SELECT status, confirmations FROM transactions WHERE id = ?').get(tx.id);
           
           if (txCheck.status !== 'completed' && actualConfirmations >= 10 && tx.currency === 'XMR') {
+            const lock = db.prepare('UPDATE transactions SET status = ? WHERE id = ? AND status = ?').run('completing', tx.id, 'pending');
+            if (lock.changes === 0) {
+              console.log('Transaction already being processed:', tx.id);
+              continue;
+            }
             console.log('Payment confirmed for transaction:', tx.id);
-            await activateLicense(tx.id);
+            if (tx.type === 'deposit') {
+              db.prepare('UPDATE transactions SET status = ? WHERE id = ?').run('completed', tx.id);
+              if (io) {
+                io.to('user_' + tx.user_id).emit('tx:deposit_completed', {
+                  transactionId: tx.id,
+                  currency: tx.currency,
+                  amount: tx.amount
+                });
+              }
+            } else {
+              await activateLicense(tx.id);
+            }
           } else if (txCheck.status !== 'completed' && actualConfirmations >= 6 && tx.currency === 'LTC') {
+            const lock = db.prepare('UPDATE transactions SET status = ? WHERE id = ? AND status = ?').run('completing', tx.id, 'pending');
+            if (lock.changes === 0) {
+              console.log('Transaction already being processed:', tx.id);
+              continue;
+            }
             console.log('Payment confirmed for transaction:', tx.id);
-            await activateLicense(tx.id);
+            if (tx.type === 'deposit') {
+              db.prepare('UPDATE transactions SET status = ? WHERE id = ?').run('completed', tx.id);
+              if (io) {
+                io.to('user_' + tx.user_id).emit('tx:deposit_completed', {
+                  transactionId: tx.id,
+                  currency: tx.currency,
+                  amount: tx.amount
+                });
+              }
+            } else {
+              await activateLicense(tx.id);
+            }
           }
         }
       } catch (error) {

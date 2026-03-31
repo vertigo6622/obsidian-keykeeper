@@ -130,6 +130,37 @@ db.exec(`
     ip TEXT NOT NULL,
     attempted_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
+
+  CREATE TABLE IF NOT EXISTS withdraw_rate_limit (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    ip TEXT NOT NULL,
+    currency TEXT NOT NULL,
+    attempted_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+`);
+
+db.exec(`
+  CREATE INDEX IF NOT EXISTS idx_transactions_user_id ON transactions(user_id);
+  CREATE INDEX IF NOT EXISTS idx_transactions_status ON transactions(status);
+  CREATE INDEX IF NOT EXISTS idx_transactions_type ON transactions(type);
+  CREATE INDEX IF NOT EXISTS idx_transactions_user_status_type ON transactions(user_id, status, type);
+  CREATE INDEX IF NOT EXISTS idx_transactions_expires ON transactions(expires_at);
+  CREATE INDEX IF NOT EXISTS idx_licenses_user_id ON licenses(user_id);
+  CREATE INDEX IF NOT EXISTS idx_licenses_license_id ON licenses(license_id);
+  CREATE INDEX IF NOT EXISTS idx_register_rate_limit_ip_time ON register_rate_limit(ip, attempted_at);
+  CREATE INDEX IF NOT EXISTS idx_tx_create_rate_limit_user_time ON tx_create_rate_limit(user_id, attempted_at);
+  CREATE INDEX IF NOT EXISTS idx_login_rate_limit_ip_time ON login_rate_limit(ip, attempted_at);
+  CREATE INDEX IF NOT EXISTS idx_login_failures_user_time ON login_failures(user_id, attempted_at);
+  CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id);
+  CREATE INDEX IF NOT EXISTS idx_sessions_expired ON sessions(expired);
+  CREATE INDEX IF NOT EXISTS idx_product_verifications_license_id ON product_verifications(license_id);
+  CREATE INDEX IF NOT EXISTS idx_hwid_verify_rate_limit_user_time ON hwid_verify_rate_limit(user_id, attempted_at);
+  CREATE INDEX IF NOT EXISTS idx_relink_rate_limit_ip_time ON relink_rate_limit(ip, attempted_at);
+  CREATE INDEX IF NOT EXISTS idx_auth_tokens_user_id ON auth_tokens(user_id);
+  CREATE INDEX IF NOT EXISTS idx_api_keys_user_id ON api_keys(user_id);
+  CREATE INDEX IF NOT EXISTS idx_withdraw_rate_limit_user_time ON withdraw_rate_limit(user_id, attempted_at);
+  CREATE INDEX IF NOT EXISTS idx_transactions_tx_hash ON transactions(tx_hash);
 `);
 
 module.exports = db;

@@ -200,6 +200,52 @@ async function getLTCBalanceByAddress(address) {
   }
 }
 
+async function sendXMR(destination, amount) {
+  try {
+    const walletBalance = await getXMRBalance();
+    if (walletBalance < amount) {
+      throw new Error('Insufficient wallet funds');
+    }
+    
+    const piconeroAmount = Math.round(amount * 1e12);
+    const result = await moneroRPC('transfer', {
+      destinations: [{ amount: piconeroAmount, address: destination }],
+      priority: 1,
+      ring_size: 16
+    });
+    return {
+      txHash: result.tx_hash,
+      fee: result.amount / 1e12
+    };
+  } catch (error) {
+    console.error('XMR send error:', error);
+    throw new Error('Failed to send XMR: ' + error.message);
+  }
+}
+
+async function sendLTC(destination, amount) {
+  try {
+    const walletBalance = await getLTCBalance();
+    if (walletBalance < amount) {
+      throw new Error('Insufficient wallet funds');
+    }
+    
+    const tx = await electrumRPC('payto', {
+      destination: destination,
+      amount: amount,
+      fee_rate: 0.00001
+    });
+    const broadcast = await electrumRPC('broadcast', { tx: tx });
+    return {
+      txHash: broadcast[0],
+      fee: tx.fee || 0
+    };
+  } catch (error) {
+    console.error('LTC send error:', error);
+    throw new Error('Failed to send LTC: ' + error.message);
+  }
+}
+
 module.exports = {
   generateXMRAddress,
   generateLTCAddress,
@@ -209,5 +255,7 @@ module.exports = {
   getLTCBalanceByAddress,
   getExchangeRates,
   getXMRTransactionConfirmations,
-  getLTCTransactionConfirmations
+  getLTCTransactionConfirmations,
+  sendXMR,
+  sendLTC
 };
