@@ -5,7 +5,9 @@ const auth = require('./auth');
 const crypto = require('crypto');
 
 const PRICES_USD_CENTS = {
+  // testing price
   pro: 100,
+  // not yet available
   commercial: 2000
 };
 
