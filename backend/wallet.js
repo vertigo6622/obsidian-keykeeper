@@ -59,7 +59,7 @@ async function moneroRPC(method, params = {}) {
 }
 
 const ELECTRUM_LTC_USER = 'user';
-const ELECTRUM_LTC_PASS = 'password';
+const ELECTRUM_LTC_PASS = process.env.ELECTRUM_LTC_PASS;
 
 async function electrumRPC(method, params = {}) {
   const response = await fetch(ELECTRUM_LTC_URL, {

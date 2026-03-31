@@ -5,13 +5,13 @@ const auth = require('./auth');
 const crypto = require('crypto');
 
 const PRICES_USD_CENTS = {
-  pro: 1,
-  commercial: 200
+  pro: 100,
+  commercial: 2000
 };
 
 const TOLERANCE = {
-  XMR: 1,
-  LTC: 1
+  XMR: BigInt(100000000),
+  LTC: BigInt(10000000)
 };
 
 const PICONERO_PER_XMR = BigInt(1e12);
@@ -24,14 +24,17 @@ function setSocketIO(socketIO) {
 }
 
 function generateTransactionId() {
-  return crypto.randomBytes(5).toString('hex').toUpperCase();
+  return crypto.randomBytes(12).toString('hex').toUpperCase();
 }
 
 function formatAmount(amount, currency) {
   if (currency === 'XMR') {
-    return (Number(amount) / 1e6).toFixed(6);
+    return (Number(amount) / 1e12).toFixed(8);
+  } else if (currency === 'LTC') {
+    return (Number(amount) / 1e8).toFixed(8);
+  } else {
+    throw new Error('Unsupported currency');
   }
-  return (Number(amount) / 1e8).toFixed(8);
 }
 
 async function createTransaction(userId, currency, licenseType, hwid, stubMac = null) {
@@ -55,14 +58,15 @@ async function createTransaction(userId, currency, licenseType, hwid, stubMac = 
     
     const usdPriceCents = PRICES_USD_CENTS[licenseType];
     const rate = currency === 'XMR' ? rates.xmr : rates.ltc;
+    const usdPrice = usdPriceCents / 100;
     
     let amountUnits;
     if (currency === 'XMR') {
-      const amountXMR = usdPriceCents / rate;
-      amountUnits = BigInt(Math.round(amountXMR * 1e6));
+      const amountXMR = usdPrice / rate;
+      amountUnits = BigInt(Math.round(amountXMR * 1e12));
     } else {
-    const amountLTC = usdPriceCents / rate;
-    amountUnits = BigInt(Math.round(amountLTC * 1e8));
+      const amountLTC = usdPrice / rate;
+      amountUnits = BigInt(Math.round(amountLTC * 1e8));
     }
     
     const amountDisplay = formatAmount(amountUnits, currency);
@@ -124,6 +128,18 @@ async function activateLicense(transactionId) {
 
 async function createDepositTransaction(userId, currency, amount) {
   try {
+    const rates = await wallet.getExchangeRates();
+    if (!rates.available) {
+      throw new Error('Exchange rates unavailable');
+    }
+    
+    const rate = currency === 'XMR' ? rates.xmr : rates.ltc;
+    const usdAmount = amount * rate;
+    
+    if (usdAmount < 20) {
+      throw new Error('Minimum deposit is $20 USD');
+    }
+    
     let address;
     
     if (currency === 'XMR') {
@@ -136,20 +152,13 @@ async function createDepositTransaction(userId, currency, amount) {
       throw new Error('Unsupported currency');
     }
     
-    const rates = await wallet.getExchangeRates();
-    if (!rates.available) {
-      throw new Error('Exchange rates unavailable');
-    }
-    
-    const rate = currency === 'XMR' ? rates.xmr : rates.ltc;
-    
     let amountUnits;
     let usdAmountCents;
     if (currency === 'XMR') {
-      amountUnits = BigInt(Math.round(amount * 1e6));
+      amountUnits = BigInt(Math.round(amount * 1e12));
       usdAmountCents = BigInt(Math.round(amount * rate * 100));
     } else {
-      amountUnits = BigInt(Math.round(amount * 1e2));
+      amountUnits = BigInt(Math.round(amount * 1e8));
       usdAmountCents = BigInt(Math.round(amount * rate * 100));
     }
     
@@ -208,6 +217,12 @@ function getTransactionById(id) {
 }
 
 function getUserBalance(userId) {
+  const deposits = db.prepare(`
+    SELECT currency, SUM(CAST(amount AS REAL)) as total FROM transactions
+    WHERE user_id = ? AND type = 'deposit' AND status = 'completed'
+    GROUP BY currency
+  `).all(userId);
+  
   const withdrawals = db.prepare(`
     SELECT currency, SUM(CAST(amount AS REAL)) as total FROM transactions
     WHERE user_id = ? AND type = 'withdraw' AND status = 'completed'
@@ -217,15 +232,27 @@ function getUserBalance(userId) {
   let xmrBalance = 0;
   let ltcBalance = 0;
   
+  deposits.forEach(d => {
+    if (d.currency === 'XMR') xmrBalance += d.total || 0;
+    if (d.currency === 'LTC') ltcBalance += d.total || 0;
+  });
+  
   withdrawals.forEach(w => {
     if (w.currency === 'XMR') xmrBalance -= w.total || 0;
     if (w.currency === 'LTC') ltcBalance -= w.total || 0;
   });
+
+  const rates = wallet.getExchangeRates();
+  let usdBalance = 0;
+  
+  if (rates.available) {
+    usdBalance = (xmrBalance * rates.xmr) + (ltcBalance * rates.ltc);
+  }
   
   return {
     xmr: Math.max(0, xmrBalance),
     ltc: Math.max(0, ltcBalance),
-    usd: '0.00'
+    usd: usdBalance.toFixed(2)
   };
 }
 
@@ -271,8 +298,8 @@ async function checkPendingPayments() {
         if (tx.currency === 'XMR') {
           const balance = await wallet.getXMRBalanceByAddress(tx.address);
           console.log('XMR check:', tx.address, 'balance:', balance, 'needed:', tx.amount);
-          const balancePiconero = BigInt(Math.round(balance * 1e6));
-          const neededPiconero = BigInt(Math.round(parseFloat(tx.amount) * 1e6));
+          const balancePiconero = BigInt(Math.round(balance * 1e12));
+          const neededPiconero = BigInt(Math.round(parseFloat(tx.amount) * 1e12));
           const tolerance = BigInt(TOLERANCE.XMR);
           if (balancePiconero >= neededPiconero - tolerance && balancePiconero <= neededPiconero + tolerance * 10n) {
             confirmed = true;
@@ -281,8 +308,8 @@ async function checkPendingPayments() {
         } else if (tx.currency === 'LTC') {
           const balance = await wallet.getLTCBalanceByAddress(tx.address);
           console.log('LTC check:', tx.address, 'balance:', balance, 'needed:', tx.amount);
-          const balanceSatoshis = BigInt(Math.round(balance * 1e2));
-          const neededSatoshis = BigInt(Math.round(parseFloat(tx.amount) * 1e2));
+          const balanceSatoshis = BigInt(Math.round(balance * 1e8));
+          const neededSatoshis = BigInt(Math.round(parseFloat(tx.amount) * 1e8));
           const tolerance = BigInt(TOLERANCE.LTC);
           if (balanceSatoshis >= neededSatoshis - tolerance && balanceSatoshis <= neededSatoshis + tolerance * 10n) {
             confirmed = true;

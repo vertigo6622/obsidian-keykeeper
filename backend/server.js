@@ -12,6 +12,7 @@ const validate = require('./validate');
 const wallet = require('./wallet');
 const packer = require('./packer-bridge');
 const pgp = require('./pgp')
+const helmet = require('helmet');
 
 const app = express();
 const server = http.createServer(app);
@@ -35,6 +36,38 @@ const PORT = process.env.PORT || 3000;
 const SESSION_SECRET = process.env.SESSION_SECRET || require('crypto').randomBytes(32).toString('hex');
 
 app.use(express.json());
+
+const isDev = process.env.NODE_ENV !== 'production';
+
+const cspDirectives = {
+  defaultSrc: ["'self'"],
+  styleSrc: ["'self'", "'unsafe-inline'"],
+  scriptSrc: ["'self'"],
+  imgSrc: ["'self'", "data:"],
+  connectSrc: ["'self'", "ws:", "wss:"],
+  fontSrc: ["'self'"],
+  objectSrc: ["'none'"],
+  mediaSrc: ["'self'"],
+  frameSrc: ["'none'"],
+  baseUri: ["'self'"],
+  formAction: ["'self'"]
+};
+
+if (!isDev) {
+  cspDirectives.upgradeInsecureRequests = [];
+}
+
+app.use(helmet.contentSecurityPolicy({
+  directives: cspDirectives
+}));
+
+if (!isDev) {
+  app.use(helmet.hsts({
+    maxAge: 31536000,
+    includeSubDomains: true,
+    preload: true
+  }));
+}
 
 const sessionMiddleware = session({
   secret: SESSION_SECRET,
@@ -62,14 +95,25 @@ app.post('/api/product/verify', async (req, res) => {
   try {
     const { license, sum, cpu, disk, mac, ram } = req.body;
     const clientIp = req.ip || req.connection.remoteAddress;
+
+    if (auth.isHwidVerifyRateLimited(null, clientIp)) {
+      return res.json({ valid: false, error: 'Too many verification attempts. Try again later.' });
+    }
     
     if (!license || !sum || !cpu || !disk || !mac || !ram) {
       auth.logProductVerification(license || 'unknown', clientIp, false);
       return res.json({ valid: false, error: 'license, sum, cpu, disk, mac, and ram required' });
     }
+        
+    const licenseData = auth.getLicenseById(license);
+    if (!licenseData) {
+      auth.logProductVerification(license, clientIp, false);
+      return res.json({ valid: false, error: 'License not found' });
+    }
     
-    if (auth.isHwidVerifyRateLimited(null, clientIp)) {
-      return res.json({ valid: false, error: 'Too many verification attempts. Try again later.' });
+    if (new Date(licenseData.expires_at) < new Date()) {
+      auth.logProductVerification(license, clientIp, false);
+      return res.json({ valid: false, error: 'License expired' });
     }
     
     auth.verifyHwidIntegrity(license, sum, cpu, disk, mac, ram, (result) => {
@@ -78,9 +122,7 @@ app.post('/api/product/verify', async (req, res) => {
         return res.json(result);
       }
       
-      const licenseData = auth.getLicenseById(license);
-      const decryptionKey = crypto.randomBytes(32).toString('hex');
-      
+      const decryptionKey = auth.getSpeckKey(license);
       auth.logProductVerification(license, clientIp, true);
       
       res.json({
@@ -116,7 +158,7 @@ app.post('/api/product/create', (req, res) => {
   const licenseType = license.type;
   const hwid = license.license_hwid || null;
   
-  packer.createPackedBinary(licenseType, hwid, (err, result) => {
+  packer.createPackedBinary(licenseType, hwid, license_id, (err, result) => {
     if (err) {
       console.error('Packer error:', err.message);
       return res.status(500).send('Failed to create binary');
@@ -124,20 +166,10 @@ app.post('/api/product/create', (req, res) => {
     
     auth.updateLicenseDownloadFilename(license_id, result.filename);
     auth.updateLicenseStubMac(license_id, result.mac);
+    auth.updateUserSpeckKey(userId, result.key);
+    auth.updateLicenseIntegrity(license_id, result.integrity);
     
-    if (result.key) {
-      auth.updateUserSpeckKey(userId, result.key);
-    }
-    
-    if (result.hwid) {
-      auth.updateLicenseHwid(license_id, result.hwid);
-    }
-    
-    if (result.integrity) {
-      auth.updateLicenseIntegrity(license_id, result.integrity);
-    }
-    
-    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Type', 'application/exe');
     res.setHeader('Content-Disposition', 'attachment; filename="' + result.filename + '"');
     res.send(result.data);
   });
@@ -640,26 +672,6 @@ callback({ canRelink: auth.canRelink(sanitizedLicenseId) });
       socket.request.session.destroy();
     }
     callback(result);
-  });
-  
-  socket.on('user:getSessions', (data, callback) => {
-    const userId = socket.request.session.userId;
-    if (!userId) {
-      return callback({ error: 'Not authenticated' });
-    }
-    
-    const sessions = auth.getUserSessions(userId);
-    callback({ sessions });
-  });
-  
-  socket.on('user:logoutAll', (data, callback) => {
-    const userId = socket.request.session.userId;
-    if (!userId) {
-      return callback({ error: 'Not authenticated' });
-    }
-    
-    db.prepare('DELETE FROM sessions WHERE user_id = ?').run(userId);
-    callback({ success: true });
   });
 });
 

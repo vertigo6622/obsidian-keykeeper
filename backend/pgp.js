@@ -28,14 +28,8 @@ async function signAddress(address, amount, currency, usdAmount) {
 amount: ${amount.toFixed(6)} ${currency} ($${usdAmount.toFixed(2)} USD)
 
 always verify the pgp signature on this message to prevent phishing\n`;
-  
   const message = await openpgp.createCleartextMessage({ text: messageText });
-  const signed = await openpgp.sign({
-    message,
-    signingKeys: key,
-    format: 'armored'
-  });
-  
+  const signed = await openpgp.sign({ message, signingKeys: key, format: 'armored' });
   return signed;
 }
 
