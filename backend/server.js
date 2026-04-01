@@ -112,6 +112,12 @@ app.post('/api/product/verify', async (req, res) => {
       return res.json({ valid: false, error: 'License not found' });
     }
     
+    const standing = auth.getAccountStanding(licenseData.user_id);
+    if (!standing.exists || standing.locked || standing.suspended) {
+      auth.logProductVerification(license, clientIp, false);
+      return res.json({ valid: false, error: 'Account not in good standing' });
+    }
+    
     if (new Date(licenseData.expires_at) < new Date()) {
       auth.logProductVerification(license, clientIp, false);
       return res.json({ valid: false, error: 'License expired' });
@@ -350,14 +356,23 @@ io.on('connection', (socket) => {
       }
 
       const license = auth.getLicenseById(sanitizedLicenseId);
+
+      if (!license) {
+        return callback({ valid: false, error: 'No active license' });
+      }
+      
+      const standing = auth.getAccountStanding(license.user_id);
+      if (!standing.exists || standing.locked || standing.suspended) {
+        return callback({ valid: false, error: 'Account not in good standing' });
+      }
         
-        if (license.stub_mac) {
-          const clientStubMac = data.mac || '';
-          if (clientStubMac && license.stub_mac !== clientStubMac) {
-            auth.suspendAccount(license.user_id);
-            return callback({ valid: false, error: 'License violated' });
-          }
+      if (license.stub_mac) {
+        const clientStubMac = data.mac || '';
+        if (clientStubMac && license.stub_mac !== clientStubMac) {
+          auth.suspendAccount(license.user_id);
+          return callback({ valid: false, error: 'License violated' });
         }
+      }
       
       auth.addHwidVerifyAttempt(null, ip);
       auth.verifyHwidIntegrity(sanitizedLicenseId, sum, mac, cpu, disk, ram, tpm, (result) => {

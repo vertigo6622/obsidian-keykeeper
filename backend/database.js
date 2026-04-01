@@ -16,7 +16,8 @@ db.exec(`
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     last_login DATETIME,
     locked_at DATETIME,
-    suspended INTEGER DEFAULT 0
+    suspended INTEGER DEFAULT 0,
+    CHECK (LENGTH(account_number) = 12)
   );
 
   CREATE TABLE IF NOT EXISTS licenses (
@@ -30,7 +31,8 @@ db.exec(`
     download_filename TEXT,
     expires_at DATETIME,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    last_relink_at DATETIME
+    last_relink_at DATETIME,
+    CHECK (expires_at IS NULL OR expires_at > created_at)
   );
 
   CREATE TABLE IF NOT EXISTS transactions (
@@ -53,7 +55,11 @@ db.exec(`
     confirmations INTEGER DEFAULT 0,
     expires_at DATETIME,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    usd_amount REAL
+    usd_amount REAL,
+    CHECK (amount > 0),
+    CHECK (confirmations >= 0),
+    CHECK (status IN ('pending', 'detected', 'completing', 'completed', 'expired', 'failed')),
+    CHECK (type IN ('purchase', 'deposit', 'withdraw'))
   );
 
   CREATE TABLE IF NOT EXISTS register_rate_limit (
@@ -136,7 +142,8 @@ db.exec(`
     user_id INTEGER NOT NULL,
     ip TEXT NOT NULL,
     currency TEXT NOT NULL,
-    attempted_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    attempted_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    CHECK (currency IN ('XMR', 'LTC'))
   );
 `);
 
