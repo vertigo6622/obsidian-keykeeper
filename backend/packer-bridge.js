@@ -43,7 +43,9 @@ function createPackedBinary(licenseType, hwid, licenseId, callback) {
       return callback(new Error('Invalid HWID format'));
     }
     args.push('--link-to-hwid', sanitizedHwid);
-  } else if (licenseId) {
+  } 
+  
+  if (licenseId) {
     const sanitizedLicenseId = validate.sanitizeLicenseId(licenseId);
     if (!sanitizedLicenseId) {
       return callback(new Error('Invalid LicenseId'));
