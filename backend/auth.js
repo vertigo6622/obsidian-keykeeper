@@ -192,32 +192,32 @@ function getUserByAccountNumber(accountNumber) {
   return stmt.get(accountNumber);
 }
 
-function isRateLimited(ip) {
+function isRateLimited(sessionId) {
   const stmt = db.prepare(`
     SELECT COUNT(*) as count FROM register_rate_limit 
-    WHERE ip = ? AND attempted_at > datetime('now', '-${RATE_LIMIT_HOURS} hour')
+    WHERE session_id = ? AND attempted_at > datetime('now', '-${RATE_LIMIT_HOURS} hour')
   `);
-  const result = stmt.get(ip);
+  const result = stmt.get(sessionId);
   return result.count >= REGISTRATION_RATE_LIMIT;
 }
 
-function addRateLimitEntry(ip) {
-  const stmt = db.prepare(`INSERT INTO register_rate_limit (ip) VALUES (?)`);
-  stmt.run(ip);
+function addRateLimitEntry(sessionId) {
+  const stmt = db.prepare(`INSERT INTO register_rate_limit (session_id) VALUES (?)`);
+  stmt.run(sessionId);
 }
 
-function isLoginRateLimited(ip) {
+function isLoginRateLimited(sessionId) {
   const stmt = db.prepare(`
     SELECT COUNT(*) as count FROM login_rate_limit 
-    WHERE ip = ? AND attempted_at > datetime('now', '-1 hour')
+    WHERE session_id = ? AND attempted_at > datetime('now', '-1 hour')
   `);
-  const result = stmt.get(ip);
+  const result = stmt.get(sessionId);
   return result.count >= LOGIN_RATE_LIMIT;
 }
 
-function addLoginAttempt(ip) {
-  const stmt = db.prepare(`INSERT INTO login_rate_limit (ip) VALUES (?)`);
-  stmt.run(ip);
+function addLoginAttempt(sessionId) {
+  const stmt = db.prepare(`INSERT INTO login_rate_limit (session_id) VALUES (?)`);
+  stmt.run(sessionId);
 }
 
 function getFailedLoginAttempts(userId) {
@@ -229,9 +229,9 @@ function getFailedLoginAttempts(userId) {
   return result.count;
 }
 
-function addFailedLoginAttempt(userId, ip) {
-  const stmt = db.prepare(`INSERT INTO login_failures (user_id, ip) VALUES (?, ?)`);
-  stmt.run(userId, ip);
+function addFailedLoginAttempt(userId, sessionId) {
+  const stmt = db.prepare(`INSERT INTO login_failures (user_id, session_id) VALUES (?, ?)`);
+  stmt.run(userId, sessionId);
   
   const attempts = getFailedLoginAttempts(userId);
   if (attempts >= FAILED_ATTEMPTS_LIMIT) {
@@ -532,34 +532,34 @@ module.exports = {
 
 const RELINK_RATE_LIMIT = 10;
 
-function isRelinkRateLimited(ip) {
+function isRelinkRateLimited(userId) {
   const stmt = db.prepare(`
     SELECT COUNT(*) as count FROM relink_rate_limit 
-    WHERE ip = ? AND attempted_at > datetime('now', '-1 hour')
+    WHERE user_id = ? AND attempted_at > datetime('now', '-1 hour')
   `);
-  const result = stmt.get(ip);
+  const result = stmt.get(userId);
   return result.count >= RELINK_RATE_LIMIT;
 }
 
-function addRelinkAttempt(ip) {
-  const stmt = db.prepare(`INSERT INTO relink_rate_limit (ip) VALUES (?)`);
-  stmt.run(ip);
+function addRelinkAttempt(userId) {
+  const stmt = db.prepare(`INSERT INTO relink_rate_limit (user_id) VALUES (?)`);
+  stmt.run(userId);
 }
 
 const TX_CREATE_RATE_LIMIT = 1;
 
-function isTxCreateRateLimited(userId, ip) {
+function isTxCreateRateLimited(userId) {
   const stmt = db.prepare(`
     SELECT COUNT(*) as count FROM tx_create_rate_limit 
-    WHERE (user_id = ? OR ip = ?) AND attempted_at > datetime('now', '-1 hour')
+    WHERE user_id = ? AND attempted_at > datetime('now', '-1 hour')
   `);
-  const result = stmt.get(userId, ip);
+  const result = stmt.get(userId);
   return result.count >= TX_CREATE_RATE_LIMIT;
 }
 
-function addTxCreateAttempt(userId, ip) {
-  const stmt = db.prepare(`INSERT INTO tx_create_rate_limit (user_id, ip) VALUES (?, ?)`);
-  stmt.run(userId, ip);
+function addTxCreateAttempt(userId) {
+  const stmt = db.prepare(`INSERT INTO tx_create_rate_limit (user_id) VALUES (?)`);
+  stmt.run(userId);
 }
 
 function cleanupOldTxCreateRateLimits() {
@@ -568,18 +568,18 @@ function cleanupOldTxCreateRateLimits() {
 
 const HWID_VERIFY_RATE_LIMIT = 100;
 
-function isHwidVerifyRateLimited(userId, ip) {
+function isHwidVerifyRateLimited(userId, sessionId) {
   const stmt = db.prepare(`
     SELECT COUNT(*) as count FROM hwid_verify_rate_limit 
-    WHERE (user_id = ? OR ip = ?) AND attempted_at > datetime('now', '-1 hour')
+    WHERE (user_id = ? OR session_id = ?) AND attempted_at > datetime('now', '-1 hour')
   `);
-  const result = stmt.get(userId, ip);
+  const result = stmt.get(userId, sessionId);
   return result.count >= HWID_VERIFY_RATE_LIMIT;
 }
 
-function addHwidVerifyAttempt(userId, ip) {
-  const stmt = db.prepare(`INSERT INTO hwid_verify_rate_limit (user_id, ip) VALUES (?, ?)`);
-  stmt.run(userId, ip);
+function addHwidVerifyAttempt(userId, sessionId) {
+  const stmt = db.prepare(`INSERT INTO hwid_verify_rate_limit (user_id, session_id) VALUES (?, ?)`);
+  stmt.run(userId, sessionId);
 }
 
 function cleanupOldHwidVerifyRateLimits() {
@@ -588,7 +588,7 @@ function cleanupOldHwidVerifyRateLimits() {
 
 const WITHDRAW_RATE_LIMIT = 5;
 
-function isWithdrawRateLimited(userId, ip) {
+function isWithdrawRateLimited(userId) {
   const stmt = db.prepare(`
     SELECT COUNT(*) as count FROM withdraw_rate_limit 
     WHERE user_id = ? AND attempted_at > datetime('now', '-1 hour')
@@ -597,9 +597,9 @@ function isWithdrawRateLimited(userId, ip) {
   return result.count >= WITHDRAW_RATE_LIMIT;
 }
 
-function addWithdrawAttempt(userId, ip, currency) {
-  const stmt = db.prepare(`INSERT INTO withdraw_rate_limit (user_id, ip, currency) VALUES (?, ?, ?)`);
-  stmt.run(userId, ip, currency);
+function addWithdrawAttempt(userId, currency) {
+  const stmt = db.prepare(`INSERT INTO withdraw_rate_limit (user_id, currency) VALUES (?, ?)`);
+  stmt.run(userId, currency);
 }
 
 function cleanupOldWithdrawRateLimits() {

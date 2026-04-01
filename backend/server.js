@@ -5,6 +5,8 @@ const session = require('express-session');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
+const Database = require('better-sqlite3');
+
 
 const auth = require('./auth');
 const tx = require('./transactions');
@@ -18,7 +20,7 @@ const app = express();
 const server = http.createServer(app);
 
 const MIN_ACCOUNT_AGE_HOURS = 24;
-const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || 'http://localhost:8000,http://127.0.0.1:8000,https://obsidian.st').split(',');
+const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || 'http://localhost:8000,http://127.0.0.1:8000,https://obsidian.st,https://status.obsidian.st').split(',');
 
 const io = new Server(server, {
   cors: {
@@ -34,7 +36,7 @@ const IDLE_TIMEOUT_MS = 15 * 60 * 1000;
 tx.setSocketIO(io);
 
 const PORT = process.env.PORT || 3000;
-const SESSION_SECRET = process.env.SESSION_SECRET || require('crypto').randomBytes(32).toString('hex');
+const SESSION_SECRET = require('crypto').randomBytes(32).toString('hex');
 
 app.use(express.json());
 
@@ -85,52 +87,94 @@ const sessionMiddleware = session({
 app.use(sessionMiddleware);
 
 io.use((socket, next) => {
-  sessionMiddleware(socket.request, socket.request.res || {}, next);
+  console.log('Socket.io session middleware - socket id:', socket.id);
+  sessionMiddleware(socket.request, socket.request.res || {}, (err) => {
+    if (err) {
+      console.error('Session middleware error:', err);
+    } else {
+      console.log('Session middleware OK - sessionID:', socket.request.sessionID);
+    }
+    next(err);
+  });
 });
 
 app.get('/', (req, res) => {
   res.json({ status: 'ok', service: 'obsidian-keykeeper' });
 });
 
-app.post('/api/product/verify', async (req, res) => {
+app.get('/keykeeper/status', async (req, res) => {
+  try {
+    let dbStatus = 'ok';
+    let xmrStatus = 'ok';
+    try {
+      await wallet.moneroRPC('get_version');
+    } catch (e) {
+      xmrStatus = 'down';
+    }
+    
+    let ltcStatus = 'ok';
+    try {
+      await wallet.electrumRPC('getbalance', {});
+    } catch (e) {
+      console.log('Error', e);
+      ltcStatus = 'down';
+    }
+    
+    const cpus = require('os').cpus();
+    const load = require('os').loadavg()[0] / cpus.length;
+    
+    res.json({
+      up: true,
+      uptime: Math.floor(process.uptime()),
+      database: dbStatus,
+      xmr_wallet: xmrStatus,
+      ltc_wallet: ltcStatus,
+      capacity: load < 0.5 ? 'normal' : 'strained'
+    });
+  } catch (error) {
+    res.json({ up: false, uptime: 0, database: 'down', xmr_wallet: 'down', ltc_wallet: 'down', capacity: 'down' });
+  }
+});
+
+app.post('/keykeeper/product/verify', async (req, res) => {
   try {
     const { license, sum, cpu, disk, mac, ram } = req.body;
-    const clientIp = req.ip || req.connection.remoteAddress;
+    const sessionId = req.sessionID || 'unknown';
 
-    if (auth.isHwidVerifyRateLimited(null, clientIp)) {
+    if (auth.isHwidVerifyRateLimited(null, sessionId)) {
       return res.json({ valid: false, error: 'Too many verification attempts. Try again later.' });
     }
     
     if (!license || !sum || !cpu || !disk || !mac || !ram) {
-      auth.logProductVerification(license || 'unknown', clientIp, false);
+      auth.logProductVerification(license || 'unknown', sessionId, false);
       return res.json({ valid: false, error: 'license, sum, cpu, disk, mac, and ram required' });
     }
         
     const licenseData = auth.getLicenseById(license);
     if (!licenseData) {
-      auth.logProductVerification(license, clientIp, false);
+      auth.logProductVerification(license, sessionId, false);
       return res.json({ valid: false, error: 'License not found' });
     }
     
     const standing = auth.getAccountStanding(licenseData.user_id);
     if (!standing.exists || standing.locked || standing.suspended) {
-      auth.logProductVerification(license, clientIp, false);
+      auth.logProductVerification(license, sessionId, false);
       return res.json({ valid: false, error: 'Account not in good standing' });
     }
     
     if (new Date(licenseData.expires_at) < new Date()) {
-      auth.logProductVerification(license, clientIp, false);
+      auth.logProductVerification(license, sessionId, false);
       return res.json({ valid: false, error: 'License expired' });
     }
     
     auth.verifyHwidIntegrity(license, sum, cpu, disk, mac, ram, (result) => {
       if (!result.valid) {
-        auth.logProductVerification(license, clientIp, false);
+        auth.logProductVerification(license, sessionId, false);
         return res.json(result);
       }
       
       const decryptionKey = auth.getSpeckKey(license);
-      auth.logProductVerification(license, clientIp, true);
+      auth.logProductVerification(license, sessionId, true);
       
       res.json({
         valid: true,
@@ -145,7 +189,7 @@ app.post('/api/product/verify', async (req, res) => {
   }
 });
 
-app.post('/api/product/create', (req, res) => {
+app.post('/keykeeper/product/create', (req, res) => {
   const userId = req.session.userId;
   if (!userId) {
     return res.status(401).send('Unauthorized');
@@ -186,8 +230,17 @@ function isAuthenticated(req) {
   return req.session && req.session.userId;
 }
 
+io.on('error', (err) => {
+  console.error('IO Error:', err);
+});
+
 io.on('connection', (socket) => {
   console.log('Client connected:', socket.id);
+  console.log('Session data:', socket.request.session);
+  
+  socket.on('error', (err) => {
+    console.error('Socket error:', socket.id, err);
+  });
   
   let lastActivity = Date.now();
   
@@ -221,7 +274,7 @@ io.on('connection', (socket) => {
   socket.on('auth:register', async (data, callback) => {
     try {
       const { password, hwid } = data;
-      const ip = socket.handshake.address || 'unknown';
+      const sessionId = socket.request.session.id || 'unknown';
       
       const sanitizedPassword = validate.sanitizePassword(password);
       
@@ -229,14 +282,14 @@ io.on('connection', (socket) => {
         return callback({ success: false, error: 'Password must be 8-128 characters' });
       }
       
-      if (auth.isRateLimited(ip)) {
+      if (auth.isRateLimited(sessionId)) {
         return callback({ success: false, error: 'Rate limited. Try again later.' });
       }
       
       const passwordHash = await auth.hashPassword(sanitizedPassword);
       const user = auth.createUser(passwordHash, hwid);
       
-      auth.addRateLimitEntry(ip);
+      auth.addRateLimitEntry(sessionId);
       
       socket.request.session.userId = user.id;
       socket.request.session.save();
@@ -255,7 +308,7 @@ io.on('connection', (socket) => {
       
       const sanitizedAccountNumber = validate.sanitizeAccountNumber(account_number);
       const sanitizedPassword = validate.sanitizePassword(password);
-      const ip = socket.handshake.address || 'unknown';
+      const sessionId = socket.request.session.id || 'unknown';
       
       console.log('Login attempt - account_number:', sanitizedAccountNumber);
       
@@ -269,12 +322,12 @@ io.on('connection', (socket) => {
         return callback({ success: false, error: 'Password must be 8-128 characters' });
       }
       
-      if (auth.isLoginRateLimited(ip)) {
+      if (auth.isLoginRateLimited(sessionId)) {
         console.log('Login failed: rate limited');
         return callback({ success: false, error: 'Too many login attempts. Try again later.' });
       }
       
-      auth.addLoginAttempt(ip);
+      auth.addLoginAttempt(sessionId);
       
       const user = auth.getUserByAccountNumber(sanitizedAccountNumber);
       if (!user) {
@@ -291,7 +344,7 @@ io.on('connection', (socket) => {
       
       const valid = await auth.verifyPassword(sanitizedPassword, user.password_hash);
       if (!valid) {
-        auth.addFailedLoginAttempt(user.id, ip);
+        auth.addFailedLoginAttempt(user.id, sessionId);
         const attemptsLeft = 5 - auth.getFailedLoginAttempts(user.id);
         return callback({ success: false, error: 'Invalid credentials. ' + attemptsLeft + ' attempts remaining.' });
       }
@@ -340,7 +393,7 @@ io.on('connection', (socket) => {
   socket.on('license:verify', async (data, callback) => {
     try {
       const { licenseId, sum, mac, cpu, disk, ram, tpm } = data;
-      const ip = socket.handshake.address || 'unknown';
+      const sessionId = socket.request.session.id || 'unknown';
       
       const sanitizedLicenseId = validate.sanitizeLicenseId(licenseId);
       if (!sanitizedLicenseId) {
@@ -351,7 +404,7 @@ io.on('connection', (socket) => {
         return callback({ valid: false, error: 'sum, cpu, disk, mac, ram, and tpm required' });
       }
       
-      if (auth.isHwidVerifyRateLimited(null, ip)) {
+      if (auth.isHwidVerifyRateLimited(null, sessionId)) {
         return callback({ valid: false, error: 'Too many verification attempts. Try again later.' });
       }
 
@@ -374,7 +427,7 @@ io.on('connection', (socket) => {
         }
       }
       
-      auth.addHwidVerifyAttempt(null, ip);
+      auth.addHwidVerifyAttempt(license.user_id, sessionId);
       auth.verifyHwidIntegrity(sanitizedLicenseId, sum, mac, cpu, disk, ram, tpm, (result) => {
         if (!result.valid) {
           return callback(result);
@@ -408,9 +461,7 @@ io.on('connection', (socket) => {
       return callback({ error: 'Account not in good standing' });
     }
     
-    const ip = socket.handshake.address || 'unknown';
-    
-    if (auth.isTxCreateRateLimited(userId, ip)) {
+    if (auth.isTxCreateRateLimited(userId)) {
       return callback({ error: 'Too many transactions. Try again later.' });
     }
     
@@ -430,7 +481,7 @@ io.on('connection', (socket) => {
       }
       
       const transaction = await tx.createTransaction(userId, sanitizedCurrency, sanitizedLicenseType, hwid, sanitizedStubMac);
-      auth.addTxCreateAttempt(userId, ip);
+      auth.addTxCreateAttempt(userId);
       callback({ success: true, ...transaction });
     } catch (error) {
       console.error('Create tx error:', error);
@@ -449,9 +500,7 @@ io.on('connection', (socket) => {
       return callback({ error: 'Account not in good standing' });
     }
     
-    const ip = socket.handshake.address || 'unknown';
-    
-    if (auth.isTxCreateRateLimited(userId, ip)) {
+    if (auth.isTxCreateRateLimited(userId)) {
       return callback({ error: 'Too many transactions. Try again later.' });
     }
     
@@ -470,7 +519,7 @@ io.on('connection', (socket) => {
       }
       
       const transaction = await tx.createDepositTransaction(userId, sanitizedCurrency, sanitizedAmount);
-      auth.addTxCreateAttempt(userId, ip);
+      auth.addTxCreateAttempt(userId);
       callback({ success: true, ...transaction });
     } catch (error) {
       console.error('Create deposit error:', error);
@@ -488,8 +537,6 @@ io.on('connection', (socket) => {
     if (!standing.exists || standing.locked || standing.suspended || standing.created_at < MIN_ACCOUNT_AGE_HOURS) {
       return callback({ error: 'Account not in good standing' });
     }
-    
-    const ip = socket.handshake.address || 'unknown';
     
     try {
       const { currency, amount, address } = data;
@@ -514,13 +561,13 @@ io.on('connection', (socket) => {
         return callback({ error: 'Address does not match selected currency' });
       }
       
-      if (auth.isWithdrawRateLimited(userId, ip)) {
+      if (auth.isWithdrawRateLimited(userId)) {
         return callback({ error: 'Too many withdrawal attempts. Try again later.' });
       }
       
       const transaction = await tx.createWithdrawTransaction(userId, sanitizedCurrency, sanitizedAmount, sanitizedAddress);
       
-      auth.addWithdrawAttempt(userId, ip, sanitizedCurrency);
+      auth.addWithdrawAttempt(userId, sanitizedCurrency);
       
       callback({ success: true, tx_id: transaction.tx_id, tx_hash: transaction.tx_hash });
     } catch (error) {
@@ -600,12 +647,6 @@ io.on('connection', (socket) => {
   });
 
   socket.on('license:relink', (data, callback) => {
-    const ip = socket.handshake.address || 'unknown';
-    
-    if (auth.isRelinkRateLimited(ip)) {
-      return callback({ error: 'Too many relink attempts. Try again later.' });
-    }
-    
     const { licenseId, machineInfo } = data;
     
     const sanitizedLicenseId = validate.sanitizeLicenseId(licenseId);
@@ -613,19 +654,23 @@ io.on('connection', (socket) => {
       return callback({ error: 'Invalid license ID format' });
     }
     
-    if (!machineInfo || typeof machineInfo !== 'object') {
-      return callback({ error: 'machineInfo required' });
-    }
-    
     const license = auth.getLicenseById(sanitizedLicenseId);
     if (!license) {
       return callback({ error: 'License not found' });
     }
-    
+
     const userId = license.user_id;
+
+    if (auth.isRelinkRateLimited(userId)) {
+      return callback({ error: 'Too many relink attempts. Try again later.' });
+    }
     
     if (!auth.canRelink(sanitizedLicenseId)) {
       return callback({ error: 'Can only relink once per month' });
+    }
+    
+    if (!machineInfo || typeof machineInfo !== 'object') {
+      return callback({ error: 'machineInfo required' });
     }
     
     const sanitizedMachineInfo = {
@@ -641,7 +686,7 @@ io.on('connection', (socket) => {
       return callback({ error: 'Failed to compute HWID' });
     }
     
-    auth.addRelinkAttempt(ip);
+    auth.addRelinkAttempt(userId);
     
     const result = auth.relinkLicense(sanitizedLicenseId, computedHwid);
     
@@ -715,37 +760,6 @@ const dataDir = path.join(__dirname, 'data');
 if (!fs.existsSync(dataDir)) {
   fs.mkdirSync(dataDir, { recursive: true });
 }
-
-const downloadsDir = path.join(__dirname, 'downloads');
-
-app.get('/api/downloads/:filename', (req, res) => {
-  const userId = req.session.userId;
-  if (!userId) {
-    return res.send();
-  }
-  
-  const license = auth.getLicenseByUserId(userId);
-  if (!license || new Date(license.expires_at) < new Date()) {
-    return res.send();
-  }
-  
-  const filename = req.params.filename;
-  const validFiles = ['obsidian-ce.exe', 'hwid_link.py'];
-  if (!validFiles.includes(filename)) {
-    return res.send();
-  }
-  
-  const safePath = path.join(downloadsDir, filename);
-  if (!safePath.startsWith(downloadsDir)) {
-    return res.send();
-  }
-  
-  if (!fs.existsSync(safePath)) {
-    return res.send();
-  }
-  
-  res.download(safePath);
-});
 
 server.listen(PORT, '127.0.0.1', () => {
   console.log('Obsidian backend running on port ' + PORT);
