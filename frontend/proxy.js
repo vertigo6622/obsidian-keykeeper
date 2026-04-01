@@ -17,7 +17,7 @@ const ALLOWED_ORIGINS = [
   'http://127.0.0.1:3000',
   'http://127.0.0.1:8080',
   'https://obsidian.st',
-  'http://obsidian.st'
+  'https://verify.obsidian.st'
 ];
 
 function isOriginAllowed(req) {
@@ -35,7 +35,7 @@ function isOriginAllowed(req) {
 }
 
 const originValidator = (req, res, next) => {
-  if (req.path.startsWith('/api')) {
+  if (req.path.startsWith('/keykeeper')) {
     if (!isOriginAllowed(req)) {
       console.log('Blocked request from:', req.headers.origin, req.headers.referer, req.ip);
       return res.status(403).json({ error: 'Forbidden' });
@@ -45,9 +45,9 @@ const originValidator = (req, res, next) => {
 };
 
 app.use(originValidator);
-const ONION_PORT = process.env.ONION_PORT || 3000;
-const SOCKS_PROXY = process.env.SOCKS_PROXY || '127.0.0.1:9050';
-const PORT = process.env.PORT || 8080;
+const ONION_PORT = 3000;
+const SOCKS_PROXY = '127.0.0.1:9050';
+const PORT = 8888;
 
 if (!ONION_ADDRESS) {
   console.error('ONION_ADDRESS env var required');
@@ -112,7 +112,10 @@ setInterval(() => {
 }, RATE_LIMIT_WINDOW);
 
 const rateLimiter = (req, res, next) => {
-  const key = req.headers['x-api-key'] || req.ip;
+  const key = req.headers['x-api-key'];
+  if (!key) {
+    return res.status(401).send();
+  }
   const now = Date.now();
   const windowStart = now - RATE_LIMIT_WINDOW;
   
@@ -164,7 +167,7 @@ apiRouter.use(crawlerBlocker);
 apiRouter.use(apiKeyAuth);
 apiRouter.all('*', proxyRequest);
 
-app.use('/api', apiRouter);
+app.use('/keykeeper', apiRouter);
 
 app.use((req, res) => res.status(404).send());
 
@@ -191,7 +194,7 @@ async function proxyRequest(req, res) {
   if (!path) {
     return res.status(400).send();
   }
-  if (!path.startsWith('/api/')) {
+  if (!path.startsWith('/keykeeper/')) {
     return res.status(403).send();
   }
 
@@ -283,5 +286,5 @@ async function proxyRequest(req, res) {
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`Clearnet proxy running on port ${PORT}`);
-  console.log(`Forwarding /api/* to ${ONION_ADDRESS}:${ONION_PORT} via SOCKS ${SOCKS_PROXY}`);
+  console.log(`Forwarding /keykeeper/* to ${ONION_ADDRESS}:${ONION_PORT} via SOCKS ${SOCKS_PROXY}`);
 });

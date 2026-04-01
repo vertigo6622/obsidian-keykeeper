@@ -42,9 +42,20 @@ function connectToBackend() {
   document.querySelector('.tx-loading').style.display = 'block';
   document.querySelector('.tx-disconnected').style.display = 'none';
   
-  socket = io('http://localhost:3000');
+  socket = io('http://127.0.0.1:3000');
+  
+  socket.on('connect_error', (err) => {
+    console.error('Connection error:', err);
+    document.querySelector('.tx-loading').style.display = 'none';
+    document.querySelector('.tx-disconnected').style.display = 'block';
+  });
+  
+  socket.on('error', (err) => {
+    console.error('Socket error:', err);
+  });
   
   socket.on('connect', () => {
+    console.log('Connected to backend');
     console.log('Connected to backend');
     checkSession();
     showTransactionBoxes();
