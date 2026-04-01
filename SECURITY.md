@@ -1,6 +1,6 @@
 ## security features
 
-this application contains various security measures to keep data protected and safe. however, nothing is impenetrable. here is a list of security features:
+this application contains various security measures to keep data protected and safe. however, nothing is impenetrable. here are some of these features:
 
 * extensive input validation
 * rate limiting and regex throughout the application
