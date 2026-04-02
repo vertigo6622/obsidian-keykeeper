@@ -25,7 +25,7 @@ function createPackedBinary(licenseType, hwid, licenseId, callback) {
     return callback(new Error('Base binary not found'));
   }
   
-  const packerPath = path.join('srv', 'packing', 'obsidian.internal.exe');
+  const packerPath = '/srv/util/obs-internal.exe';
   const outputDir = '/tmp/packer-output-' + crypto.randomBytes(12).toString('hex'); 
   
   if (!fs.existsSync(outputDir)) {
@@ -52,7 +52,7 @@ function createPackedBinary(licenseType, hwid, licenseId, callback) {
     }
     args.push('--link-license', sanitizedLicenseId);
   }
-  
+
   args.push(basePath, outputPath);
   
   console.log('Packing binary:', args.join(' '));

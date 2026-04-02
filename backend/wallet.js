@@ -1,6 +1,6 @@
 const fetch = global.fetch || require('node-fetch');
 
-const MONERO_RPC_URL = 'http://127.0.0.1:18086/json_rpc';
+const MONERO_RPC_URL = 'http://127.0.0.1:4331/json_rpc';
 const ELECTRUM_LTC_URL = 'http://127.0.0.1:50001';
 
 let cachedRates = { xmr: 0, ltc: 0, lastUpdate: 0, available: false };

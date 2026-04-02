@@ -2,7 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const openpgp = require('openpgp');
 
-const PGP_KEY_PATH = process.env.PGP_KEY_PATH || path.join(__dirname, 'keys', 'obsidiantest.asc');
+const PGP_KEY_PATH = '/srv/keys/obsidiantest.asc';
 const PGP_KEY_PASSPHRASE = process.env.PGP_KEY_PASSPHRASE;
 
 let privateKey = null;

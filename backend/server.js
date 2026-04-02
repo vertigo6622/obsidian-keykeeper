@@ -24,7 +24,7 @@ const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || 'http://localhost:8000,h
 
 const io = new Server(server, {
   cors: {
-    origin: ALLOWED_ORIGINS,
+    origin: '*',
     methods: ["GET", "POST"],
     credentials: true
   },
@@ -77,7 +77,7 @@ const sessionMiddleware = session({
   resave: false,
   saveUninitialized: false,
   cookie: {
-    secure: true,
+    secure: false,
     httpOnly: true,
     maxAge: 24 * 60 * 60 * 1000,
     sameSite: 'strict'
