@@ -42,7 +42,7 @@ function connectToBackend() {
   document.querySelector('.tx-loading').style.display = 'block';
   document.querySelector('.tx-disconnected').style.display = 'none';
   
-  socket = io('http://127.0.0.1:3000');
+  socket = io('http://127.0.0.1:8888');
   
   socket.on('connect_error', (err) => {
     console.error('Connection error:', err);
