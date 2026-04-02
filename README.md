@@ -63,10 +63,9 @@ the server receives both the stubs calculated hash as well as the components tha
          └─────────┘  └─────────┘  └─────────┘
 ```
 
-1. client sends request to `proxy:8080/api/...`
-2. proxy authenticates via api key
-3. proxy routes request through socks5 (tor) to the hidden service
-4. hidden service processes request and returns response
+1. client sends request to `proxy:8888/socket.io/...`
+2. proxy routes request through socks5 (tor) to the hidden service
+3. hidden service processes request and returns response
 
 ### SPECK-128
 
@@ -158,7 +157,6 @@ The hwid is verified by re-computing the MAC and comparing against the stored va
 - tor daemon (for proxy)
 - monerod + monero-wallet-rpc
 - electrum-ltc
-- veracrypt (for storing db and js files, mount when in use)
 
 ## api reference
 
@@ -166,10 +164,9 @@ The hwid is verified by re-computing the MAC and comparing against the stored va
 
 | method | endpoint | description |
 |--------|----------|-------------|
-| POST | `/api/register` | register new user |
-| POST | `/api/login` | user login |
-| POST | `/api/logout` | user logout |
-| POST | `/api/verify` | verify license (requires HWID) |
+| POST | `/keykeeper/status` | backend status |
+| POST | `/keykeeper/product/verify` | verify license |
+| POST | `/keykeeper/product/create` | use internal packer to pack product (requires linked license id) |
 
 ### socket.io events
 
@@ -194,15 +191,9 @@ The hwid is verified by re-computing the MAC and comparing against the stored va
 | event | description |
 |-------|-------------|
 | `tx:create` | create purchase transaction |
-| `tx:withdraw` | create withdrawal request |
+| `tx:deposit` | create deposit transaction |
+| `tx:withdraw` | create withdrawal transaction |
 | `history:get` | get transaction + license history |
-
-**account:**
-| event | description |
-|-------|-------------|
-| `account:getInfo` | get account info |
-| `account:updateEmail` | update email |
-| `account:requestPgpKey` | get pgp-encrypted payment info |
 
 ## license
 
