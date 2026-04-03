@@ -148,6 +148,43 @@ function verifyHwidIntegrity(licenseId, sum, cpu, disk, mac, ram, tpm, callback)
   }
 }
 
+function computeHwidFromMachineInfo(machineInfo, license) {
+  if (!license.integrity || !license.stub_mac) {
+    console.error('Missing integrity or stub_mac in license');
+    return null;
+  }
+  
+  const data = Buffer.alloc(96);
+  
+  const fields = [
+    machineInfo.cpu_serial,
+    machineInfo.disk_serial,
+    machineInfo.mac_address,
+    machineInfo.ram_serial,
+    machineInfo.tpm_ek
+  ];
+  
+  let offset = 16;
+  for (const field of fields) {
+    const fieldData = field || '';
+    const fieldBuffer = Buffer.from(fieldData, 'utf8');
+    fieldBuffer.copy(data, offset);
+    offset += 16;
+  }
+  
+  try {
+    const keyHex = license.stub_mac;
+    const [mac0, mac1] = speckCbcMac(data, keyHex);
+    const macBuffer = Buffer.alloc(16);
+    macBuffer.writeBigUInt64LE(mac0, 0);
+    macBuffer.writeBigUInt64LE(mac1, 8);
+    return macBuffer.toString('hex');
+  } catch (e) {
+    console.error('HWID computation error:', e.message);
+    return null;
+  }
+}
+
 function generateAccountNumber() {
   const maxAttempts = 10;
   for (let i = 0; i < maxAttempts; i++) {
@@ -428,43 +465,6 @@ function getSpeckKey(userId) {
 function updateUserSpeckKey(userId, key) {
   const stmt = db.prepare(`UPDATE users SET speck_key = ? WHERE id = ?`);
   stmt.run(key, userId);
-}
-
-function computeHwidFromMachineInfo(machineInfo, license) {
-  if (!license.integrity || !license.stub_mac) {
-    console.error('Missing integrity or stub_mac in license');
-    return null;
-  }
-  
-  const data = Buffer.alloc(96);
-  
-  const fields = [
-    machineInfo.cpu_serial,
-    machineInfo.disk_serial,
-    machineInfo.mac_address,
-    machineInfo.ram_serial,
-    machineInfo.tpm_ek
-  ];
-  
-  let offset = 16;
-  for (const field of fields) {
-    const fieldData = field || '';
-    const fieldBuffer = Buffer.from(fieldData, 'utf8');
-    fieldBuffer.copy(data, offset);
-    offset += 16;
-  }
-  
-  try {
-    const keyHex = license.stub_mac;
-    const [mac0, mac1] = speckCbcMac(data, keyHex);
-    const macBuffer = Buffer.alloc(16);
-    macBuffer.writeBigUInt64LE(mac0, 0);
-    macBuffer.writeBigUInt64LE(mac1, 8);
-    return macBuffer.toString('hex');
-  } catch (e) {
-    console.error('HWID computation error:', e.message);
-    return null;
-  }
 }
 
 function getUserByLicenseId(licenseId) {

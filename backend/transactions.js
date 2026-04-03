@@ -191,7 +191,7 @@ async function createDepositTransaction(userId, currency, amount) {
 }
 
 async function createWithdrawTransaction(userId, currency, amount, address) {
-  const balance = getUserBalance(userId);
+  const balance = await getUserBalance(userId);
   const available = currency === 'XMR' ? balance.xmr : balance.ltc;
   
   if (amount > available) {
@@ -281,7 +281,7 @@ function getTransactionById(id) {
   return stmt.get(id);
 }
 
-function getUserBalance(userId) {
+async function getUserBalance(userId) {
   const deposits = db.prepare(`
     SELECT currency, SUM(CAST(amount AS REAL)) as total FROM transactions
     WHERE user_id = ? AND type = 'deposit' AND status = 'completed'
@@ -307,7 +307,7 @@ function getUserBalance(userId) {
     if (w.currency === 'LTC') ltcBalance -= w.total || 0;
   });
 
-  const rates = wallet.getExchangeRates();
+  const rates = await wallet.getExchangeRates();
   let usdBalance = 0;
   
   if (rates.available) {

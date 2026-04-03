@@ -7,40 +7,21 @@ const fs = require('fs');
 const crypto = require('crypto');
 const Database = require('better-sqlite3');
 
-
 const auth = require('./auth');
 const tx = require('./transactions');
 const validate = require('./validate');
 const wallet = require('./wallet');
 const packer = require('./packer-bridge');
 const pgp = require('./pgp')
+const adminIpc = require('./admin-ipc');
 const helmet = require('helmet');
 
 const app = express();
-const server = http.createServer(app);
 
-const MIN_ACCOUNT_AGE_HOURS = 24;
-const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || 'http://localhost:8000,http://127.0.0.1:8000,https://obsidian.st,https://status.obsidian.st').split(',');
-
-const io = new Server(server, {
-  cors: {
-    origin: '*',
-    methods: ["GET", "POST"],
-    credentials: true
-  },
-  maxHttpBufferSize: 1024 * 1024
-});
-
-const IDLE_TIMEOUT_MS = 15 * 60 * 1000;
-
-tx.setSocketIO(io);
-
-const PORT = process.env.PORT || 3000;
-const SESSION_SECRET = require('crypto').randomBytes(32).toString('hex');
-
-app.use(express.json());
-
-const isDev = process.env.NODE_ENV !== 'production';
+app.disable('x-powered-by');
+app.disable('etag');
+app.set('trust proxy', 1);
+app.set('query parser', 'simple');
 
 const cspDirectives = {
   defaultSrc: ["'self'"],
@@ -56,28 +37,50 @@ const cspDirectives = {
   formAction: ["'self'"]
 };
 
-if (!isDev) {
+if (!process.env.NODE_ENV !== 'production') {
   cspDirectives.upgradeInsecureRequests = [];
 }
 
-app.use(helmet.contentSecurityPolicy({
-  directives: cspDirectives
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: cspDirectives
+  },
+  //hsts: {                   // enable when going live
+  //  maxAge: 31536000,
+  //  includeSubDomains: true,
+  //  preload: true
+  //}
 }));
 
-if (!isDev) {
-  app.use(helmet.hsts({
-    maxAge: 31536000,
-    includeSubDomains: true,
-    preload: true
-  }));
-}
+const server = http.createServer(app);
+
+const MIN_ACCOUNT_AGE_HOURS = 24;
+const ORIGINS = 'https://obsidian.st,https://verify.obsidian.st,http://127.0.0.1:8000';
+
+const io = new Server(server, {
+  cors: {
+    origin: ORIGINS,
+    methods: ["GET", "POST"],
+    credentials: true
+  },
+  maxHttpBufferSize: 1024 * 1024
+});
+
+const IDLE_TIMEOUT_MS = 15 * 60 * 1000;
+
+tx.setSocketIO(io);
+
+const PORT = process.env.PORT || 3000;
+const SESSION_SECRET = require('crypto').randomBytes(32).toString('hex');
+
+app.use(express.json());
 
 const sessionMiddleware = session({
   secret: SESSION_SECRET,
   resave: false,
   saveUninitialized: false,
   cookie: {
-    secure: false,
+    secure: false,              // set true when going live
     httpOnly: true,
     maxAge: 24 * 60 * 60 * 1000,
     sameSite: 'strict'
@@ -109,6 +112,7 @@ app.get('/keykeeper/status', async (req, res) => {
     try {
       await wallet.moneroRPC('get_version');
     } catch (e) {
+      console.error('XMR error:', e);
       xmrStatus = 'down';
     }
     
@@ -116,7 +120,7 @@ app.get('/keykeeper/status', async (req, res) => {
     try {
       await wallet.electrumRPC('getbalance', {});
     } catch (e) {
-      console.log('Error', e);
+      console.error('LTC error:', e);
       ltcStatus = 'down';
     }
     
@@ -146,23 +150,27 @@ app.post('/keykeeper/product/verify', async (req, res) => {
     }
     
     if (!license || !sum || !cpu || !disk || !mac || !ram) {
+      console.log('Failed HWID validation: missing fields');
       auth.logProductVerification(license || 'unknown', sessionId, false);
       return res.json({ valid: false, error: 'license, sum, cpu, disk, mac, and ram required' });
     }
         
     const licenseData = auth.getLicenseById(license);
     if (!licenseData) {
+      console.log('Failed HWID validation: missing license');
       auth.logProductVerification(license, sessionId, false);
       return res.json({ valid: false, error: 'License not found' });
     }
     
     const standing = auth.getAccountStanding(licenseData.user_id);
     if (!standing.exists || standing.locked || standing.suspended) {
+      console.log('Failed HWID validation: account not in good standing | id:', licenseData.user_id);
       auth.logProductVerification(license, sessionId, false);
       return res.json({ valid: false, error: 'Account not in good standing' });
     }
     
     if (new Date(licenseData.expires_at) < new Date()) {
+      console.log('Failed HWID validation: License expired', licenseData.user_id);
       auth.logProductVerification(license, sessionId, false);
       return res.json({ valid: false, error: 'License expired' });
     }
@@ -368,7 +376,7 @@ io.on('connection', (socket) => {
     callback({ success: true });
   });
   
-  socket.on('user:getProfile', (data, callback) => {
+  socket.on('user:getProfile', async (data, callback) => {
     const userId = socket.request.session.userId;
     if (!userId) {
       return callback({ error: 'Not authenticated' });
@@ -376,7 +384,7 @@ io.on('connection', (socket) => {
     
     const user = auth.getUserById(userId);
     const license = auth.getLicenseByUserId(userId);
-    const balance = tx.getUserBalance(userId);
+    const balance = await tx.getUserBalance(userId);
     const pendingTx = tx.getPendingTransaction(userId);
     
     callback({
@@ -388,66 +396,6 @@ io.on('connection', (socket) => {
       balance,
       pending_transaction: pendingTx || null
     });
-  });
-  
-  socket.on('license:verify', async (data, callback) => {
-    try {
-      const { licenseId, sum, mac, cpu, disk, ram, tpm } = data;
-      const sessionId = socket.request.session.id || 'unknown';
-      
-      const sanitizedLicenseId = validate.sanitizeLicenseId(licenseId);
-      if (!sanitizedLicenseId) {
-        return callback({ valid: false, error: 'Invalid license ID format' });
-      }
-      
-      if (!sum || !mac || !cpu || !disk || !ram || !tpm) {
-        return callback({ valid: false, error: 'sum, cpu, disk, mac, ram, and tpm required' });
-      }
-      
-      if (auth.isHwidVerifyRateLimited(null, sessionId)) {
-        return callback({ valid: false, error: 'Too many verification attempts. Try again later.' });
-      }
-
-      const license = auth.getLicenseById(sanitizedLicenseId);
-
-      if (!license) {
-        return callback({ valid: false, error: 'No active license' });
-      }
-      
-      const standing = auth.getAccountStanding(license.user_id);
-      if (!standing.exists || standing.locked || standing.suspended) {
-        return callback({ valid: false, error: 'Account not in good standing' });
-      }
-        
-      if (license.stub_mac) {
-        const clientStubMac = data.mac || '';
-        if (clientStubMac && license.stub_mac !== clientStubMac) {
-          auth.suspendAccount(license.user_id);
-          return callback({ valid: false, error: 'License violated' });
-        }
-      }
-      
-      auth.addHwidVerifyAttempt(license.user_id, sessionId);
-      auth.verifyHwidIntegrity(sanitizedLicenseId, sum, mac, cpu, disk, ram, tpm, (result) => {
-        if (!result.valid) {
-          return callback(result);
-        }
-        
-        socket.request.session.userId = license.user_id;
-        socket.request.session.licenseId = sanitizedLicenseId;
-        socket.request.session.save();
-        
-        callback({
-          valid: true,
-          type: result.type,
-          account_number: license.account_number,
-          hwid: license.license_hwid
-        });
-      });
-    } catch (error) {
-      console.error('License verify error:', error);
-      callback({ valid: false, error: 'Verification failed' });
-    }
   });
   
   socket.on('tx:create', async (data, callback) => {
@@ -762,8 +710,9 @@ if (!fs.existsSync(dataDir)) {
 }
 
 server.listen(PORT, '127.0.0.1', () => {
-  console.log('Obsidian backend running on port ' + PORT);
-  console.log('PGP key path: ' + (process.env.PGP_KEY_PATH || '/srv/pgp/key.asc'));
+  console.log('[keykeeper] obsidian backend running on port ' + PORT);
+  console.log('[keykeeper] pgp key path: ' + (process.env.PGP_KEY_PATH || '/srv/pgp/key.asc'));
+  adminIpc.startIPCServer();
   pgp.loadPrivateKey();
   
   auth.cleanupOldSessions();
@@ -777,7 +726,7 @@ server.listen(PORT, '127.0.0.1', () => {
   }, 30000);
   
   wallet.getExchangeRates().then(rates => {
-    console.log('Initial exchange rates:', rates);
+    console.log('[keykeeper] initial exchange rates:', rates);
   });
   setInterval(() => {
     wallet.getExchangeRates();

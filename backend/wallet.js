@@ -34,13 +34,13 @@ async function getExchangeRates() {
       available: true
     };
 
-    console.log('Exchange rates updated - XMR: $' + cachedRates.xmr + ', LTC: $' + cachedRates.ltc);
+    console.log('[wallet] exchange rates updated - XMR: $' + cachedRates.xmr + ', LTC: $' + cachedRates.ltc);
     
     return cachedRates;
   } catch (error) {
-    console.error('Failed to fetch exchange rates:', error.message);
+    console.error('[wallet] failed to fetch exchange rates:', error.message);
     if (cachedRates.lastUpdate && cachedRates.available) {
-      console.log('Using cached rates');
+      console.log('[wallet] using cached rates');
       return cachedRates;
     }
     cachedRates.available = false;

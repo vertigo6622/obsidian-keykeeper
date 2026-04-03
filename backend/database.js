@@ -143,6 +143,15 @@ db.exec(`
     attempted_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     CHECK (currency IN ('XMR', 'LTC'))
   );
+
+  CREATE TABLE IF NOT EXISTS admin_audit (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    action_type TEXT NOT NULL,
+    target_type TEXT,
+    target_id TEXT,
+    details TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
 `);
 
 db.exec(`
@@ -166,6 +175,11 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_api_keys_user_id ON api_keys(user_id);
   CREATE INDEX IF NOT EXISTS idx_withdraw_rate_limit_user_time ON withdraw_rate_limit(user_id, attempted_at);
   CREATE INDEX IF NOT EXISTS idx_transactions_tx_hash ON transactions(tx_hash);
+  CREATE INDEX IF NOT EXISTS idx_admin_audit_created ON admin_audit(created_at);
+  CREATE INDEX IF NOT EXISTS idx_admin_audit_action ON admin_audit(action_type);
+  CREATE INDEX IF NOT EXISTS idx_admin_audit_target ON admin_audit(target_type, target_id);
 `);
+
+db.prepare(`DELETE FROM admin_audit WHERE created_at < datetime('now', '-14 days')`).run();
 
 module.exports = db;
