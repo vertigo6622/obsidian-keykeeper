@@ -31,11 +31,19 @@ the server receives both the stubs calculated hash as well as the components tha
   - SPECK-128-CBC-MAC for hwid integrity verification
   - auto-delete XMR transactions after 7 days
   - escaping inner html to prevent XSS injection
+  - no emails, users identified by account numbers
 
 - **tor-over-clearnet**
   - socks5 proxy routes clearnet traffic through tor
   - increases privacy and security of the backend
   - doesn't require tor browser
+
+- **admin shell:**
+  - local-only admin ipc shell
+  - directly manipulate the database
+  - withdraw from the server wallet
+  - create/discard licenses
+  - view user info, suspend accounts, etc
 
 ## architecture
 
@@ -157,44 +165,3 @@ The hwid is verified by re-computing the MAC and comparing against the stored va
 - tor daemon (for proxy)
 - monerod + monero-wallet-rpc
 - electrum-ltc
-
-## api reference
-
-### http endpoints
-
-| method | endpoint | description |
-|--------|----------|-------------|
-| POST | `/keykeeper/status` | backend status |
-| POST | `/keykeeper/product/verify` | verify license |
-| POST | `/keykeeper/product/create` | use internal packer to pack product (requires linked license id) |
-
-### socket.io events
-
-**authentication:**
-| event | description |
-|-------|-------------|
-| `auth:register` | register via socket |
-| `auth:login` | login via socket |
-| `auth:logout` | logout via socket |
-| `user:getProfile` | get user profile |
-
-**licenses:**
-| event | description |
-|-------|-------------|
-| `license:verify` | verify license validity |
-| `license:create` | create new license (via payment) |
-| `license:initRelink` | begin license relink process |
-| `license:relink` | complete hardware relink |
-| `license:canRelink` | check remaining relinks |
-
-**transactions:**
-| event | description |
-|-------|-------------|
-| `tx:create` | create purchase transaction |
-| `tx:deposit` | create deposit transaction |
-| `tx:withdraw` | create withdrawal transaction |
-| `history:get` | get transaction + license history |
-
-## license
-
-licensed under modified ACSL 1.4
