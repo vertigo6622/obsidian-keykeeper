@@ -28,12 +28,12 @@ the server receives both the stubs calculated hash as well as the components tha
 
 **verification process:** 
 ```
-┌─────────────┐      ┌─────────────┐      ┌─────────────┐      ┌─────────────┐      ┌─────────────┐      ┌─────────────┐
-│   client    │◄────►│   proxy     │◄────►│  tor relay  │◄────►│  tor relay  │◄────►│  tor relay  │◄────►│  keykeeper  │
-│ (browser)   │      │ (port 8888) │      │    (1)      │      │    (2)      │      │    (3)      │      │ (rendezvous)│
-└─────────────┘      └─────────────┘      └─────────────┘      └─────────────┘      └─────────────┘      └─────────────┘
-                ^ sends: hwid, speck-cbc-mac, hw data 
-                  recieves: decryption key 
+┌─────────────┐      ┌─────────────┐      ┌─────────────┐      ┌─────────────┐
+│   client    │◄────►│   proxy     │◄────►│ tor network │◄────►│  keykeeper  │
+│ (browser)   │      │ (port 8888) │      │ (3 relays)  │      │ (rendezvous)│
+└─────────────┘      └─────────────┘      └─────────────┘      └─────────────┘
+  ^ sends: hwid, speck-cbc-mac, hw data 
+    recieves: decryption key 
 ```
 
 - **security and privacy:**
