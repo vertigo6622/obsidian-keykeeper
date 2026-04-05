@@ -63,18 +63,18 @@ the server receives both the stubs calculated hash as well as the components tha
 ```
                     ┌─────────────┐
                     │   client    │
-                    │ (browser)   │─────────────┐             
-                    └──────┬──────┘             │ 
+                    │ (browser)   │◄────────────┐             
+                    └──────▲──────┘             │ 
                            │ <- http/https      │ <- socket.io websockets
                     ┌──────▼──────┐      ┌──────▼──────┐
                     │   nginx     │─────►│  8888proxy  │
                     │(port 443/80)│      │ (socks5/tor)│
-                    └─────────────┘      └──────┬──────┘
+                    └─────────────┘      └──────▲──────┘
                                                 │ <- persistent connection
                     ┌─────────────┐      ┌──────▼──────┐
-                    │  backend    │◄─────│ onion       │
+                    │  backend    │◄────►│ onion       │
                     │ (node.js)   │      │ network     │
-                    └──────┬──────┘      └─────────────┘
+                    └──────▲──────┘      └─────────────┘
                            │ <- anonymously handles payments and licenses
               ┌────────────┼────────────┐
               │            │            │
