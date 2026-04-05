@@ -18,24 +18,6 @@ the server receives both the stubs calculated hash as well as the components tha
   - monero (xmr)
   - litecoin (ltc)
 
-- **hardware-bound tor-over-clearnet licensing**
-  - hwid verification using SPECK-128-CBC-MAC
-  - client packer stub connects to proxy on frontend port 8888
-  - accesses backend through proxy (which routes through tor)
-  - license relinking for hardware changes (max 3 times)
-  - per-user SPECK encryption keys
-  - takes 2-5 seconds on average round trip + computation
-
-**verification process:** 
-```
-┌─────────────┐      ┌─────────────┐      ┌─────────────┐      ┌─────────────┐
-│   client    │◄────►│   proxy     │◄────►│ tor network │◄────►│  keykeeper  │
-│ (browser)   │      │ (port 8888) │      │ (3 relays)  │      │ (rendezvous)│
-└─────────────┘      └─────────────┘      └─────────────┘      └─────────────┘
-  ^ sends: hwid, speck-cbc-mac, hw data 
-    recieves: decryption key 
-```
-
 - **security and privacy:**
   - pgp-signed payment address
   - tor-over-clearnet backend
@@ -57,6 +39,24 @@ the server receives both the stubs calculated hash as well as the components tha
   - withdraw from the server wallet
   - create/discard licenses
   - view user info, suspend accounts, etc
+
+- **hardware-bound tor-over-clearnet licensing**
+  - hwid verification using SPECK-128-CBC-MAC
+  - client packer stub connects to proxy on frontend port 8888
+  - accesses backend through proxy (which routes through tor)
+  - license relinking for hardware changes (max 3 times)
+  - per-user SPECK encryption keys
+  - takes 2-5 seconds on average round trip + computation
+
+## verification process:
+```
+┌─────────────┐      ┌─────────────┐      ┌─────────────┐      ┌─────────────┐
+│   client    │◄────►│   proxy     │◄────►│ tor network │◄────►│  keykeeper  │
+│ (browser)   │      │ (port 8888) │      │ (3 relays)  │      │ (rendezvous)│
+└─────────────┘      └─────────────┘      └─────────────┘      └─────────────┘
+  ^ sends: hwid, speck-cbc-mac, hw data 
+    recieves: decryption key 
+```
 
 ## architecture
 
