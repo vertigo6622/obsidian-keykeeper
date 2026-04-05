@@ -52,7 +52,7 @@ the server receives both the stubs calculated hash as well as the components tha
 ```
 ┌─────────────┐      ┌─────────────┐      ┌─────────────┐      ┌─────────────┐
 │   client    │◄────►│   proxy     │◄────►│ tor network │◄────►│  keykeeper  │
-│ (browser)   │      │ (port 8888) │      │ (3 relays)  │      │ (rendezvous)│
+│ (obsidian)  │      │ (port 8888) │      │ (3 relays)  │      │ (rendezvous)│
 └─────────────┘      └─────────────┘      └─────────────┘      └─────────────┘
   ^ sends: hwid, speck-cbc-mac, hw data 
     recieves: decryption key 
