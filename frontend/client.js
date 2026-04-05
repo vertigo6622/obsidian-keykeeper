@@ -16,17 +16,6 @@ function goBackFromPro() {
   document.getElementById(lastTabBeforePro).checked = true;
 }
 
-function esc(str) {
-  if (!str) return '';
-  return String(str).replace(/[&<>"']/g, c => ({
-    '&': '&amp;',
-    '<': '&lt;',
-    '>': '&gt;',
-    '"': '&quot;',
-    "'": '&#39;'
-  }[c]));
-}
-
 function setLastTabBeforeLicense() {
   const checked = document.querySelector('input[name="tabs"]:checked');
   lastTabBeforeLicense = checked ? checked.id : 'tab-purchase';
@@ -42,7 +31,7 @@ function connectToBackend() {
   document.querySelector('.tx-loading').style.display = 'block';
   document.querySelector('.tx-disconnected').style.display = 'none';
   
-  socket = io('http://127.0.0.1:8888');
+  socket = io('http://206.245.132.222:8888');
   
   socket.on('connect_error', (err) => {
     console.error('Connection error:', err);
@@ -61,7 +50,6 @@ function connectToBackend() {
     showTransactionBoxes();
     
     socket.on('tx:detected', (data) => {
-      console.log('Transaction detected:', data);
       const panelMap = {
         'XMR': 'panel-monero-processing',
         'LTC': 'panel-litecoin-processing'
@@ -71,15 +59,15 @@ function connectToBackend() {
         panel.innerHTML = `
           <label class="back-btn" for="tab-payment">&lt; back</label>
           <h1>Processing Payment</h1>
-          <p>transaction detected: ${esc(data.tx_id)}</p>
+          <p>tx id: ${data.tx_id}</p>
           <p>amount: ${data.amount} ${data.currency}</p>
           <p>waiting for confirmations<span class="loader"><span>.</span><span>.</span><span>.</span></span></p>
+          <p style="margin-top: 10px;> feel free to do something else while it confirms. your license will be issued automatically when it reaches the confirmation target.<p>
         `;
       }
     });
     
     socket.on('tx:confirmed', (data) => {
-      console.log('Transaction confirmed:', data);
       const panelMap = {
         'XMR': 'panel-monero-processing',
         'LTC': 'panel-litecoin-processing'
@@ -89,7 +77,7 @@ function connectToBackend() {
         panel.innerHTML = `
           <label class="back-btn" for="tab-transactions">&lt; back</label>
           <h1>Payment Complete!</h1>
-          <p>license id: ${esc(data.license_id)}</p>
+          <p>license id: ${data.license_id}</p>
           <p>transaction complete</p>
         `;
         setTimeout(() => {
@@ -130,6 +118,14 @@ function connectToBackend() {
   
   socket.on('disconnect', () => {
     console.log('Disconnected from backend');
+    currentUser = null;
+    document.querySelectorAll('.tx-section, .tx-title, .tx-grid').forEach(function(el) {
+      el.style.display = 'none';
+    });
+    document.querySelector('.tx-loading').style.display = 'none';
+    document.querySelector('.tx-disconnected').style.display = 'block';
+    const authBtn = document.getElementById('auth-btn');
+    if (authBtn) authBtn.style.display = 'none';
   });
 
   socket.on('session:timeout', (data) => {
@@ -201,7 +197,6 @@ function showLoggedOutUI() {
   if (authBtn) {
     authBtn.textContent = 'log in';
   }
-  
   document.getElementById('balance-xmr').textContent = 'monero balance: 0.000000 XMR';
   document.getElementById('balance-ltc').textContent = 'litecoin balance: 0.000000 LTC';
   document.getElementById('balance-usd').textContent = 'usd credits: $0.00 USD';
@@ -213,8 +208,8 @@ function updateProfileUI() {
   const profileContent = `
     <label class="back-btn" for="tab-transactions">&lt; back</label>
     <h1>Profile</h1>
-    <p>account number: ${esc(currentUser.account_number)}</p>
-    <p>license: ${esc(currentUser.license) || 'none'}</p>
+    <p>account number: ${currentUser.account_number}</p>
+    <p>license: ${currentUser.license || 'none'}</p>
     <p style="margin-top: 16px;"><span class="link-btn" onclick="document.getElementById('tab-manage').checked = true;">manage license</span></p>
   `;
   document.getElementById('panel-profile').innerHTML = profileContent;
@@ -408,9 +403,9 @@ function displayTransaction(tx) {
   
   const content = `
     <div class="pgp-box">
-      <pre>${esc(tx.signed_address)}</pre>
+      <pre>${tx.signed_address}</pre>
     </div>
-    <p style="margin-top: 10px;">transaction id: ${esc(tx.tx_id || 'pending')}</p>
+    <p style="margin-top: 10px;">transaction id: ${(tx.tx_id || 'pending')}</p>
     <p style="margin-top: 10px;">amount: ${tx.amount} ${tx.currency}</p>
     <p style="margin-top: 10px;">waiting for transaction<span class="loader"><span>.</span><span>.</span><span>.</span></span></p>
   `;
@@ -429,7 +424,7 @@ function doWithdraw(currency, amount, address) {
         <label class="back-btn" for="tab-withdraw">&lt; back</label>
         <h1>Withdrawing</h1>
         <p>broadcasting transaction<span class="loader"><span>.</span><span>.</span><span>.</span></span></p>
-        <p style="margin-top: 10px;">transaction id: ${esc(response.tx_id)}</p>
+        <p style="margin-top: 10px;">transaction id: ${response.tx_id}</p>
       `;
     } else {
       alert(response.error || 'Withdrawal failed');
@@ -459,11 +454,11 @@ function displayTransactionHistory(history) {
         content += `
           <div style="border: 0.5px solid #fff; padding: 8px; margin-top: 8px;">
             <p><strong>Transaction</strong></p>
-            <p>Type: ${esc(item.subtype)}</p>
-            <p>Currency: ${esc(item.currency)}</p>
+            <p>Type: ${item.subtype}</p>
+            <p>Currency: ${item.currency}</p>
             <p>Amount: ${item.amount}</p>
-            <p>Status: ${esc(item.status)}</p>
-            ${item.tx_hash ? `<p>TX Hash: ${esc(item.tx_hash)}</p>` : ''}
+            <p>Status: ${item.status}</p>
+            ${item.tx_hash ? `<p>TX Hash: ${item.tx_hash}</p>` : ''}
             <p>Date: ${new Date(item.date).toLocaleString()}</p>
           </div>
         `;
@@ -471,8 +466,8 @@ function displayTransactionHistory(history) {
         content += `
           <div style="border: 0.5px solid #fff; padding: 8px; margin-top: 8px;">
             <p><strong>License</strong></p>
-            <p>License ID: ${esc(item.license_id)}</p>
-            <p>Type: ${esc(item.license_type)}</p>
+            <p>License ID: ${item.license_id}</p>
+            <p>Type: ${item.license_type}</p>
             <p>Expires: ${item.expires_at ? new Date(item.expires_at).toLocaleString() : 'Never'}</p>
             <p>Created: ${new Date(item.date).toLocaleString()}</p>
           </div>
