@@ -62,15 +62,15 @@ the server receives both the stubs calculated hash as well as the components tha
 
 ```
                     ┌─────────────┐
-                    │   client    │
-                    │ (browser)   │
-                    └──────┬──────┘
-                           │ <- socket.io websocket
-                    ┌──────▼──────┐      ┌─────────────┐
-                    │   nginx     │─────►│   proxy     │
-                    │   (port 80) │      │ (socks5/tor)│
+                    │   client    │─────────────┐
+                    │ (browser)   │             │
+                    └──────┬──────┘             │ 
+                           │ <- http/https      │ <- socket.io websockets
+                    ┌──────▼──────┐      ┌──────▼──────┐
+                    │   nginx     │─────►│  8888proxy  │
+                    │(port 443/80)│      │ (socks5/tor)│
                     └─────────────┘      └──────┬──────┘
-           establishes persistent connection -> │
+           establishes persistent connection -> │   
                     ┌─────────────┐      ┌──────▼──────┐
                     │  backend    │◄─────│ onion       │
                     │ (node.js)   │      │ network     │
