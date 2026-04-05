@@ -120,6 +120,20 @@ function sanitizeBoolean(value) {
   return null;
 }
 
+function sanitizeStubMac(mac) {
+  if (!mac || typeof mac !== 'string') return null;
+  const sanitized = mac.trim().toUpperCase().replace(/[^A-F0-9]/g, '');
+  if (sanitized.length !== 32) return null;
+  return sanitized;
+}
+
+function sanitizeIntegrityKey(key) {
+  if (!key || typeof key !== 'string') return null;
+  const sanitized = key.trim().toUpperCase().replace(/[^A-F0-9]/g, '');
+  if (sanitized.length !== 32) return null;
+  return sanitized;
+}
+
 module.exports = {
   sanitizePassword,
   sanitizeString,
@@ -135,5 +149,7 @@ module.exports = {
   sanitizeWithdrawAmount,
   validateWithdrawAddress,
   sanitizeDepositAmount,
-  sanitizeBoolean
+  sanitizeBoolean,
+  sanitizeStubMac,
+  sanitizeIntegrityKey
 };

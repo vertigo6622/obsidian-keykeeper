@@ -76,6 +76,7 @@ async function electrumRPC(method, params = {}) {
     })
   });
   const data = await response.json();
+  console.log('electrumRPC data:', data);
   return data.result;
 }
 
@@ -94,10 +95,10 @@ async function generateXMRAddress() {
 
 async function generateLTCAddress() {
   try {
-    const result = await electrumRPC('add_request', { amount: 0 });
+    const result = await electrumRPC('createnewaddress', {});
     return {
-      address: result.address,
-      id: result.id
+      address: result,
+      id: address.id
     };
   } catch (error) {
     console.error('LTC address generation error:', error);
@@ -237,7 +238,7 @@ async function sendLTC(destination, amount) {
     });
     const broadcast = await electrumRPC('broadcast', { tx: tx });
     return {
-      txHash: broadcast[0],
+      txHash: broadcast[0].tx_hash,
       fee: tx.fee || 0
     };
   } catch (error) {

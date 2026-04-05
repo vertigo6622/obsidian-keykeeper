@@ -1,8 +1,35 @@
-const Database = require('better-sqlite3');
+const Database = require('better-sqlite3-multiple-ciphers');
 const path = require('path');
+const crypto = require('crypto');
+const fs = require('fs');
 
 const dbPath = '/srv/db/obsidian.db';
+const dbKey = process.env.DATABASE_KEY;
+
+if (!fs.existsSync(dbPath)) {
+  dbKey = crypto.randomBytes(32).toString('hex');
+  console.log('[database] no database found! creating new one with key:', dbKey);
+}
+
+if (!dbKey) {
+  throw new Error('DATABASE_KEY environment variable is required');
+}
+
+if (!/^[0-9a-fA-F]{64}$/.test(dbKey)) {
+  throw new Error('DATABASE_KEY must be a 64-character hex string');
+}
+
 const db = new Database(dbPath);
+
+db.pragma("key = '" + dbKey + "'");
+db.pragma('cipher = aes-256-cbc');
+db.pragma('kdf_iter = 256000');
+
+try {
+  db.prepare('SELECT COUNT(*) FROM sqlite_master').get();
+} catch (e) {
+  throw new Error('Cannot decrypt database. DATABASE_KEY may be incorrect or database is corrupted.');
+}
 
 db.pragma('journal_mode = WAL');
 

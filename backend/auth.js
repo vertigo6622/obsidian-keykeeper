@@ -99,6 +99,7 @@ function verifyHwidIntegrity(licenseId, sum, cpu, disk, mac, ram, tpm, callback)
   try {
     const license = getLicenseById(licenseId);
     if (!license || !license.stub_mac) {
+      console.log('[auth] field not found');
       return callback({ valid: false, error: 'License not found' });
     }
     
@@ -123,23 +124,44 @@ function verifyHwidIntegrity(licenseId, sum, cpu, disk, mac, ram, tpm, callback)
     Buffer.from(ramStr, 'utf8').copy(data, 64, 0, 16);
     Buffer.from(tpmStr, 'utf8').copy(data, 80, 0, 16);
     
-    const keyHex = license.stub_mac;
+    const keyHex = license.integrity;
     const [computed0, computed1] = speckCbcMac(data, keyHex);
     
     const computedMac = Buffer.alloc(16);
     computedMac.writeBigUInt64LE(computed0, 0);
     computedMac.writeBigUInt64LE(computed1, 8);
+
+    console.log('[auth] stub_mac from DB:', license.stub_mac);
+    console.log('[auth] integrity key from DB:', license.integrity);
+    console.log('[auth] data buffer hex:', data.toString('hex'));
+    console.log('[auth] computed MAC:', computedMac.toString('hex'));
+    console.log('[auth] expected MAC:', expectedMac.toString('hex'));
+
+    const expectedMac = Buffer.alloc(16);
+    expectedMac.writeBigUInt64LE(BigInt('0x' + sum.slice(0, 16)), 0);
+    expectedMac.writeBigUInt64LE(BigInt('0x' + sum.slice(16, 32)), 8);
     
-    const expectedMac = Buffer.from(sum, 'hex');
     const databaseHwid = license.hwid;
+
+    if (!databaseHwid) {
+      if (!crypto.timingSafeEqual(computedMac, expectedMac)) {
+        console.log('[auth] hwid check failed');
+        return callback({ valid: false, error: 'Hardware ID integrity check failed' });
+      }
+      console.log('[auth] first verification. storing hwid in db');
+      updateLicenseHwid(licenseId, computedMac.toString('hex'));
+      return callback({ valid: true, type: license.type });
+    }
     
     const valid1 = crypto.timingSafeEqual(computedMac, expectedMac);
     const valid2 = crypto.timingSafeEqual(expectedMac, databaseHwid);
     const valid3 = crypto.timingSafeEqual(computedMac, databaseHwid);
 
     if (!valid1 || !valid2 || !valid3) {
+      console.log('[auth] hwid check failed');
       return callback({ valid: false, error: 'Hardware ID integrity check failed' });
     } else {
+      console.log('[auth] hwid check succeeded');
       return callback({ valid: true, type: license.type });
     }
   } catch (e) {

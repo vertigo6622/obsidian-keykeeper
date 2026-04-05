@@ -55,7 +55,7 @@ app.use(helmet({
 const server = http.createServer(app);
 
 const MIN_ACCOUNT_AGE_HOURS = 24;
-const ORIGINS = 'https://obsidian.st,https://verify.obsidian.st,http://127.0.0.1:8000';
+const ORIGINS = 'https://obsidian.st,https://verify.obsidian.st,http://127.0.0.1:8000,http://206.245.132.222'; 
 
 const io = new Server(server, {
   cors: {
@@ -66,7 +66,7 @@ const io = new Server(server, {
   maxHttpBufferSize: 1024 * 1024
 });
 
-const IDLE_TIMEOUT_MS = 15 * 60 * 1000;
+const IDLE_TIMEOUT_MS = 60 * 60 * 1000;
 
 tx.setSocketIO(io);
 
@@ -142,14 +142,24 @@ app.get('/keykeeper/status', async (req, res) => {
 
 app.post('/keykeeper/product/verify', async (req, res) => {
   try {
-    const { license, sum, cpu, disk, mac, ram } = req.body;
+    console.log('[auth] product verification request:', req.body);
+    const mapped = {
+      license: req.body['0'],
+      cpu: req.body['1'],
+      disk: req.body['2'],
+      mac: req.body['3'],
+      ram: req.body['4'],
+      tpm: req.body['5'],
+      sum: req.body['6'] + req.body['7']
+    };
+    const { license, sum, cpu, disk, mac, ram, tpm } = mapped;
     const sessionId = req.sessionID || 'unknown';
 
     if (auth.isHwidVerifyRateLimited(null, sessionId)) {
       return res.json({ valid: false, error: 'Too many verification attempts. Try again later.' });
     }
     
-    if (!license || !sum || !cpu || !disk || !mac || !ram) {
+    if (!license || !sum || !cpu || !disk || !mac || !ram || !tpm) {
       console.log('Failed HWID validation: missing fields');
       auth.logProductVerification(license || 'unknown', sessionId, false);
       return res.json({ valid: false, error: 'license, sum, cpu, disk, mac, and ram required' });
@@ -175,19 +185,19 @@ app.post('/keykeeper/product/verify', async (req, res) => {
       return res.json({ valid: false, error: 'License expired' });
     }
     
-    auth.verifyHwidIntegrity(license, sum, cpu, disk, mac, ram, (result) => {
+    auth.verifyHwidIntegrity(license, sum, cpu, disk, mac, ram, tpm, (result) => {
       if (!result.valid) {
         auth.logProductVerification(license, sessionId, false);
         return res.json(result);
       }
       
-      const decryptionKey = auth.getSpeckKey(license);
+      const decryptionKey = auth.getSpeckKey(licenseData.user_id);
       auth.logProductVerification(license, sessionId, true);
       
       res.json({
         valid: true,
         type: result.type,
-        decryption_key: decryptionKey,
+        key: decryptionKey,
         expires_at: licenseData.expires_at
       });
     });
@@ -318,7 +328,7 @@ io.on('connection', (socket) => {
       const sanitizedPassword = validate.sanitizePassword(password);
       const sessionId = socket.request.session.id || 'unknown';
       
-      console.log('Login attempt - account_number:', sanitizedAccountNumber);
+      console.log('[keykeeper] Login attempt - account_number:', sanitizedAccountNumber);
       
       if (!sanitizedAccountNumber) {
         console.log('Login failed: invalid account number');
@@ -359,6 +369,8 @@ io.on('connection', (socket) => {
       
       auth.clearFailedLoginAttempts(user.id);
       auth.updateLastLogin(user.id);
+
+      console.log('[keykeeper] login successful. id:', user.id);
       
       socket.request.session.userId = user.id;
       socket.request.session.save();
@@ -430,6 +442,9 @@ io.on('connection', (socket) => {
       
       const transaction = await tx.createTransaction(userId, sanitizedCurrency, sanitizedLicenseType, hwid, sanitizedStubMac);
       auth.addTxCreateAttempt(userId);
+
+      console.log('[keykeeper] transaction created. user id:', userId, 'currency:', sanitizedCurrency, 'license type:', licenseType);
+
       callback({ success: true, ...transaction });
     } catch (error) {
       console.error('Create tx error:', error);
@@ -468,6 +483,9 @@ io.on('connection', (socket) => {
       
       const transaction = await tx.createDepositTransaction(userId, sanitizedCurrency, sanitizedAmount);
       auth.addTxCreateAttempt(userId);
+
+      console.log('[keykeeper] deposit transaction created. user id:', userId, 'currency:', sanitizedCurrency, 'amount', sanitizedAmount);
+
       callback({ success: true, ...transaction });
     } catch (error) {
       console.error('Create deposit error:', error);
@@ -512,10 +530,11 @@ io.on('connection', (socket) => {
       if (auth.isWithdrawRateLimited(userId)) {
         return callback({ error: 'Too many withdrawal attempts. Try again later.' });
       }
-      
+
       const transaction = await tx.createWithdrawTransaction(userId, sanitizedCurrency, sanitizedAmount, sanitizedAddress);
-      
       auth.addWithdrawAttempt(userId, sanitizedCurrency);
+      
+      console.log('[keykeeper] withdraw transaction created. user id:', userId, 'currency:', sanitizedCurrency, 'amount:', sanitizedAmount);
       
       callback({ success: true, tx_id: transaction.tx_id, tx_hash: transaction.tx_hash });
     } catch (error) {

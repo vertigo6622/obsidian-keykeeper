@@ -4,7 +4,7 @@ const pgp = require('./pgp');
 const auth = require('./auth');
 const crypto = require('crypto');
 
-const PRICES_USD_CENTS = { pro: 100, commercial: 2000 };
+const PRICES_USD_CENTS = { pro: 10, commercial: 2000 };
 const TOLERANCE = { XMR: BigInt(100000), LTC: BigInt(10) };
 
 const MAX_DAILY_WITHDRAW_USD = 200;
@@ -17,6 +17,10 @@ let io = null;
 
 function setSocketIO(socketIO) {
   io = socketIO;
+}
+
+function getIO() {
+  return io;
 }
 
 function generateTransactionId() {
@@ -33,7 +37,6 @@ function formatAmount(amount, currency) {
 async function createTransaction(userId, currency, licenseType, hwid, stubMac = null) {
   try {
     let address;
-    
     if (currency === 'XMR') {
       const result = await wallet.generateXMRAddress();
       address = result.address;
@@ -88,8 +91,8 @@ async function createTransaction(userId, currency, licenseType, hwid, stubMac = 
 
 async function activateLicense(transactionId) {
   try {
-    const lockStmt = db.prepare('UPDATE transactions SET status = ? WHERE id = ? AND status = ?');
-    const lockResult = lockStmt.run('activating', transactionId, 'pending');
+    const lockStmt = db.prepare('UPDATE transactions SET status = ? WHERE id = ? AND status IN (?, ?)');
+    const lockResult = lockStmt.run('activating', transactionId, 'pending', 'completing');
     
     if (lockResult.changes === 0) {
       return { success: false, error: 'Transaction already processed' };
@@ -488,6 +491,7 @@ function getPendingTransaction(userId) {
 
 module.exports = {
   setSocketIO,
+  getIO,
   createTransaction,
   createDepositTransaction,
   createWithdrawTransaction,
