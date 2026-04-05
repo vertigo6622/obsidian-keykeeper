@@ -10,11 +10,11 @@ the server receives both the stubs calculated hash as well as the components tha
 
 ## features
 
-- **license types (configurable)**
+- **license types (configurable):**
   - **pro license**: 6-month subscription for individual users
   - **commercial license**: 6-month subscription for commercial use
 
-- **payment options**
+- **payment options:**
   - monero (xmr)
   - litecoin (ltc)
 
@@ -28,7 +28,7 @@ the server receives both the stubs calculated hash as well as the components tha
   - escaping inner html to prevent XSS injection
   - no emails, users identified by account numbers
 
-- **tor-over-clearnet**
+- **tor-over-clearnet:**
   - socks5 proxy routes clearnet traffic through tor
   - increases privacy and security of the backend
   - doesn't require tor browser
@@ -40,7 +40,7 @@ the server receives both the stubs calculated hash as well as the components tha
   - create/discard licenses
   - view user info, suspend accounts, etc
 
-- **hardware-bound tor-over-clearnet licensing**
+- **hardware-bound tor-over-clearnet licensing:**
   - hwid verification using SPECK-128-CBC-MAC
   - client packer stub connects to proxy on frontend port 8888
   - accesses backend through proxy (which routes through tor)
