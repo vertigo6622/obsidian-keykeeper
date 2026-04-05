@@ -177,6 +177,47 @@ const handlers = {
     return { success: true };
   },
 
+  'license:change-stub-mac': async (data) => {
+    const validate = require('./validate');
+    const sanitizedMac = validate.sanitizeStubMac(data.new_stub_mac);
+    if (!sanitizedMac) return { error: 'Invalid stub MAC format. Must be 32 hexadecimal characters.' };
+    const license = db.prepare('SELECT * FROM licenses WHERE license_id = ?').get(data.license_id);
+    if (!license) return { error: 'License not found' };
+    db.prepare('UPDATE licenses SET stub_mac = ? WHERE license_id = ?').run(sanitizedMac, data.license_id);
+    logAudit('license:change-stub-mac', 'license', data.license_id, null);
+    return { success: true };
+  },
+
+  'license:change-integrity': async (data) => {
+    const validate = require('./validate');
+    const sanitized = validate.sanitizeIntegrityKey(data.new_integrity);
+    if (!sanitized) return { error: 'Invalid integrity key format. Must be 32 hexadecimal characters.' };
+    const license = db.prepare('SELECT * FROM licenses WHERE license_id = ?').get(data.license_id);
+    if (!license) return { error: 'License not found' };
+    db.prepare('UPDATE licenses SET integrity = ? WHERE license_id = ?').run(sanitized, data.license_id);
+    logAudit('license:change-integrity', 'license', data.license_id, null);
+    return { success: true };
+  },
+
+  'user:change-speck-key': async (data) => {
+    const validate = require('./validate');
+    const sanitized = validate.sanitizeIntegrityKey(data.new_speck_key);
+    if (!sanitized) return { error: 'Invalid speck key format. Must be 32 hex characters.' };
+    const user = db.prepare('SELECT id FROM users WHERE account_number = ?').get(data.account_number);
+    if (!user) return { error: 'User not found' };
+    db.prepare('UPDATE users SET speck_key = ? WHERE id = ?').run(sanitized, user.id);
+    logAudit('user:change-speck-key', 'user', data.account_number, null);
+    return { success: true };
+  },
+
+  'license:reset-hwid': async (data) => {
+    const license = db.prepare('SELECT * FROM licenses WHERE license_id = ?').get(data.license_id);
+    if (!license) return { error: 'License not found' };
+    db.prepare('UPDATE licenses SET hwid = NULL, last_relink_at = datetime(\'now\') WHERE license_id = ?').run(data.license_id);
+    logAudit('license:reset-hwid', 'license', data.license_id, null);
+    return { success: true };
+  },
+
   'license:verify': async (data) => {
     const license = db.prepare('SELECT * FROM licenses WHERE license_id = ?').get(data.license_id);
     if (!license) return { error: 'License not found' };
@@ -223,19 +264,43 @@ const handlers = {
   'tx:forcecomplete': async (data) => {
     const transaction = db.prepare('SELECT * FROM transactions WHERE id = ?').get(data.tx_id);
     if (!transaction) return { error: 'Transaction not found' };
+    const io = tx.getIO();
     if (transaction.type === 'purchase') {
       const licenseId = auth.createLicense(transaction.user_id, transaction.license_type, transaction.hwid, transaction.stub_mac);
       db.prepare('UPDATE transactions SET status = ?, license_id = ? WHERE id = ?').run('completed', licenseId, data.tx_id);
+      if (io) {
+        io.to('user_' + transaction.user_id).emit('tx:confirmed', {
+          transactionId: data.tx_id,
+          license_id: licenseId,
+          currency: transaction.currency,
+          amount: transaction.amount
+        });
+      }
       logAudit('tx:forcecomplete', 'transaction', String(data.tx_id), 'license=' + licenseId);
       return { success: true, license_id: licenseId };
     }
     db.prepare('UPDATE transactions SET status = ? WHERE id = ?').run('completed', data.tx_id);
+    if (transaction.type === 'deposit' && io) {
+      io.to('user_' + transaction.user_id).emit('tx:deposit_completed', {
+        transactionId: data.tx_id,
+        currency: transaction.currency,
+        amount: transaction.amount
+      });
+    }
     logAudit('tx:forcecomplete', 'transaction', String(data.tx_id), null);
     return { success: true };
   },
 
   'tx:cancel': async (data) => {
+    const transaction = db.prepare('SELECT * FROM transactions WHERE id = ?').get(data.tx_id);
     db.prepare('UPDATE transactions SET status = ? WHERE id = ? AND status = ?').run('expired', data.tx_id, 'pending');
+    const io = tx.getIO();
+    if (transaction && io) {
+      io.to('user_' + transaction.user_id).emit('tx:expired', {
+        transactionId: data.tx_id,
+        currency: transaction.currency
+      });
+    }
     logAudit('tx:cancel', 'transaction', String(data.tx_id), null);
     return { success: true };
   },
@@ -397,11 +462,11 @@ function startIPCServer() {
   });
 
   server.listen(SOCKET_PATH, () => {
-    console.log('[admin-ipc] Listening on', SOCKET_PATH);
+    console.log('[admin-ipc] listening on', SOCKET_PATH);
   });
 
   server.on('error', (err) => {
-    console.error('[admin-ipc] Server error:', err.message);
+    console.error('[admin-ipc] server error:', err.message);
   });
 
   return server;

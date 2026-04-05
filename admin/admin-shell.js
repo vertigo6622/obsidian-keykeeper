@@ -190,6 +190,41 @@ async function handleChangePassword(parts) {
   console.log(GREEN + 'password changed for ' + acct + RESET);
 }
 
+async function handleChangeStubMac(parts) {
+  const lid = parts[2];
+  const stubMac = parts[3];
+  if (!lid || !stubMac) return console.log(YELLOW + 'usage: change stub-mac <license_id> <new_stub_mac>' + RESET);
+  const res = await sendCommand('license:change-stub-mac', { license_id: lid, new_stub_mac: stubMac });
+  if (res.error) return error(res.error);
+  console.log(GREEN + 'stub-mac updated for ' + lid + RESET);
+}
+
+async function handleChangeIntegrity(parts) {
+  const lid = parts[2];
+  const integrity = parts[3];
+  if (!lid || !integrity) return console.log(YELLOW + 'usage: change integrity-key <license_id> <new_integrity_key>' + RESET);
+  const res = await sendCommand('license:change-integrity', { license_id: lid, new_integrity: integrity });
+  if (res.error) return error(res.error);
+  console.log(GREEN + 'integrity-key updated for ' + lid + RESET);
+}
+
+async function handleChangeSpeckKey(parts) {
+  const acct = parts[2];
+  const key = parts[3];
+  if (!acct || !key) return console.log(YELLOW + 'usage: change speck-key <account_number> <new_speck_key>' + RESET);
+  const res = await sendCommand('user:change-speck-key', { account_number: acct, new_speck_key: key });
+  if (res.error) return error(res.error);
+  console.log(GREEN + 'speck-key updated for ' + acct + RESET);
+}
+
+async function handleResetLicenseHwid(parts) {
+  const lid = parts[2];
+  if (!lid) return console.log(YELLOW + 'usage: reset license-hwid <license_id>' + RESET);
+  const res = await sendCommand('license:reset-hwid', { license_id: lid });
+  if (res.error) return error(res.error);
+  console.log(GREEN + 'license hwid reset for ' + lid + RESET);
+}
+
 async function handleCreateLicense(parts) {
   const userId = parts[2];
   const type = (parts[3] || '').toLowerCase();
@@ -330,7 +365,7 @@ async function handleTxPending(parts) {
 }
 
 async function handleTxForceComplete(parts) {
-  const txId = parts[2];
+  const txId = parts[3];
   if (!txId) return console.log(YELLOW + 'usage: tx force complete <tx_id>' + RESET);
   const confirmed = await confirmAction(YELLOW + 'force complete transaction ' + txId + '? (yes/no): ' + RESET);
   if (!confirmed) return console.log(YELLOW + 'cancelled' + RESET);
@@ -486,7 +521,9 @@ function printHelp(parts) {
       'lock':       'lock <account_number>',
       'unlock':     'unlock <account_number>',
       'delete':     'delete <account_number>',
-      'change':     'change password <account_number> <new_password>',
+      'change':     'change password <account_number> <new_password>\n  change stub-mac <license_id> <new_stub_mac>\n  change integrity-key <license_id> <new_integrity_key>\n  change speck-key <account_number> <new_speck_key>',
+      'reset':      'reset license-hwid <license_id>',
+      'debug':      'change stub-mac <license_id> <new_stub_mac>\n  change integrity-key <license_id> <new_integrity_key>\n  change speck-key <account_number> <new_speck_key>',
       'license':    'license info <license_id>\n  license list [user_id|all] [limit]\n  license discard <license_id>\n  license extend <license_id> [months]\n  license relink <license_id> <new_hwid>\n  license verify <license_id>',
       'discard':    'discard license <license_id>',
       'extend':     'extend license <license_id> [months]',
@@ -509,8 +546,8 @@ function printHelp(parts) {
   }
   console.log(BOLD + '\n=== obsidian admin shell ===\n' + RESET);
   console.log(CYAN + 'user management:' + RESET);
-  console.log('  user info <account_number>        user details & balance');
-  console.log('  user search <query>               search users');
+  console.log('  user info <account_number>         user details & balance');
+  console.log('  user search <query>                search users');
   console.log('  user list [limit]                  list recent users');
   console.log('  create account                     generate new account');
   console.log('  suspend <account_number>           suspend account');
@@ -528,6 +565,7 @@ function printHelp(parts) {
   console.log('  extend license <license_id> [mo]   extend license');
   console.log('  relink license <id> <new_hwid>     force HWID relink');
   console.log('  verify license <license_id>        check license validity');
+  console.log('  reset license-hwid <license_id>      clear HWID for re-bind');
   console.log();
   console.log(CYAN + 'transaction management:' + RESET);
   console.log('  tx info <tx_id>                    transaction details');
@@ -548,6 +586,11 @@ function printHelp(parts) {
   console.log('  wallet balance [XMR|LTC|all]       server wallet balances');
   console.log('  audit list [limit]                 ciew audit log');
   console.log('  audit search <type> [id] [limit]   search audit log');
+  console.log();
+  console.log(CYAN + 'debug:' + RESET);
+  console.log('  change stub-mac <license_id> <stub_mac>    update stub MAC');
+  console.log('  change integrity-key <license_id> <key>    update integrity key');
+  console.log('  change speck-key <account> <key>           update speck key');
   console.log();
   console.log(GRAY + '  help [command]    clear    exit' + RESET);
   console.log();
@@ -580,7 +623,14 @@ function processCommand(line) {
     case 'delete': return handleDelete(parts);
     case 'change':
       if (parts[1] === 'password') return handleChangePassword(parts);
-      console.log(YELLOW + 'usage: change password <account_number> <new_password>' + RESET);
+      if (parts[1] === 'stub-mac') return handleChangeStubMac(parts);
+      if (parts[1] === 'integrity-key') return handleChangeIntegrity(parts);
+      if (parts[1] === 'speck-key') return handleChangeSpeckKey(parts);
+      console.log(YELLOW + 'usage: change password <account_number> <new_password> | stub-mac <license_id> <new_stub_mac> | integrity-key <license_id> <new_integrity_key> | speck-key <account_number> <new_speck_key>' + RESET);
+      return;
+    case 'reset':
+      if (parts[1] === 'license-hwid') return handleResetLicenseHwid(parts);
+      console.log(YELLOW + 'usage: reset license-hwid <license_id>' + RESET);
       return;
     case 'license':
       if (parts[1] === 'info') return handleLicenseInfo(parts);
@@ -656,7 +706,8 @@ function startREPL() {
         'user info ', 'user search ', 'user list ', 'user delete ',
         'create account', 'create license ',
         'suspend ', 'unsuspend ', 'lock ', 'unlock ', 'delete ',
-        'change password ',
+        'change password ', 'change stub-mac ', 'change integrity-key ', 'change speck-key ',
+        'reset license-hwid ',
         'license info ', 'license list ', 'license discard ', 'license extend ', 'license relink ', 'license verify ',
         'discard license ', 'extend license ', 'relink license ', 'verify license ',
         'tx info ', 'tx list ', 'tx pending', 'tx force complete ', 'tx cancel ', 'tx check payments', 'tx withdraw ',
