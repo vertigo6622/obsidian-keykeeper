@@ -88,32 +88,33 @@ the server receives both the stubs calculated hash as well as the components tha
 2. proxy routes request through socks5 (tor) to the hidden service
 3. hidden service processes request and returns response
 
+---
+
 ### SPECK-128
 
-SPECK is a lightweight block cipher designed by the NSA. 
-
-obsidian keykeeper uses a custom implementation of SPECK-128 with CBC-MAC for hardware id verification. this ensures that license bindings cannot be spoofed.
+SPECK is a lightweight block cipher designed by the NSA. it is up to 5x faster than AES as it uses a simple ARX (add-rotate-xor) set of operations rather than the expensive AES-NI operations that require special hardware to properly execute. obsidian pro uses this algorithm to encrypt/decrypt the payload, and as part of its CBC-MAC integrity and license verification checks. see more about CBC-MAC below.
 
 **parameters:**
 - block size: 128 bits
 - key size: 128 bits
 - rounds: 34
 
-### round function
+### speck encrypt rounds
 
-the round function operates on two 64-bit words (x, y) using:
-- **right rotation** (ror64): `(x >> r) | (x << (64 - r))`
-- **left rotation** (rol64): `(x << r) | (x >> (64 - r))`
-- **modular addition**: `(x + y) mod 2^64`
-- **xor**: `x ^ k`
+the encrypt function has 34 rounds where it operates on two 64-bit words (x, y) using:
+1. **right rotation** (ror64): `(x >> r) | (x << (64 - r))`
+2. **modular addition**: `(x + y) mod 2^64`
+3. **xor**: `x ^ k`
+4. **left rotation** (rol64): `(x << r) | (x >> (64 - r))`
+5. **xor** `x ^ y`
 
 ```javascript
-function speckRound(x, y, k) {
-  x = ror64(x, 8);
-  x = (x + y) mod 2^64;
-  x = x ^ k;
-  y = rol64(y, 3);
-  y = y ^ x;
+function speckEncryptBlock(x, y, roundKeys) {
+  for (let i = 0; i < SPECK_ROUNDS; i++) {
+    x = (ror64(x, 8n) + y) & 0xFFFFFFFFFFFFFFFFn;
+    x = (x ^ roundKeys[i]);
+    y = (rol64(y, 3n) ^ x);
+  }
   return [x, y];
 }
 ```
@@ -124,22 +125,23 @@ the key schedule expands a 128-bit key into 34 round keys:
 
 ```javascript
 function speckKeySchedule(key) {
-  // key[0], key[1] are the initial 64-bit key words
+  const roundKeys = new Array(SPECK_ROUNDS);
+  let b = key[1];
   roundKeys[0] = key[0];
-  b = key[1];
   
-  for (let i = 0; i < 33; i++) {
-    b = ror64(b, 8) + roundKeys[i];
-    b = b ^ i;
-    roundKeys[i + 1] = rol64(roundKeys[i], 3) ^ b;
+  for (let i = 0; i < SPECK_ROUNDS - 1; i++) {
+    b = (ror64(b, 8n) + roundKeys[i]) & 0xFFFFFFFFFFFFFFFFn;
+    b = (b ^ BigInt(i));
+    roundKeys[i + 1] = (rol64(roundKeys[i], 3n) ^ b);
   }
+  
   return roundKeys;
 }
 ```
 
 ### CBC-MAC
 
-CBC-MAC (Cipher Block Chaining Message Authentication Code) ensures license verification integrity:
+obsidian keykeeper uses a custom SPECK-based 128bit CBC-MAC (Cipher Block Chaining Message Authentication Code) to ensure license verification integrity:
 
 1. data is padded to a multiple of 128 bits (16 bytes)
 2. each 128-bit block is XORed with the previous ciphertext
@@ -147,11 +149,9 @@ CBC-MAC (Cipher Block Chaining Message Authentication Code) ensures license veri
 4. the final 128-bit output is the MAC
 
 ```javascript
-function speckCbcMac(data, keyHex) {
-  // Initialize chaining variables
+function speckCbcMac(data, keyHex) { // simplified
   let chain0 = 0n, chain1 = 0n;
   
-  // Process 16-byte blocks
   for (let i = 0; i < fullBlocks; i++) {
     block0 = block0 ^ chain0;
     block1 = block1 ^ chain1;
@@ -162,19 +162,12 @@ function speckCbcMac(data, keyHex) {
 }
 ```
 
-### hwid generation
+### hwid generation:
 
 hardware ids are computed from client machine information:
-1. collect machine info (CPU, memory, OS details)
-2. generate a json payload with the machine info
-3. compute SPECK-128-CBC-MAC using the user's integrity key
-4. store the resulting MAC as the hardware id
-
-The hwid is verified by re-computing the MAC and comparing against the stored value using a time safe funtion to prevent timing attacks.
-
-### prerequisites
-
-- node.js 18+
-- tor daemon (for proxy)
-- monerod + monero-wallet-rpc
-- electrum-ltc
+1. stub collects machine info (hardware serials, cpuid, tpm-ek)
+2. compute SPECK-128-CBC-MAC using the user's integrity key
+3. constructs a json payload with the machine info and MAC
+4. transmits json payload over tor to keykeeper via clearnet proxy
+5. hwid is verified by re-computing the MAC serverside
+6. stub receives speck key and decrypts payload
