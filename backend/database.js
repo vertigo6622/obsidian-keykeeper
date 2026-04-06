@@ -4,7 +4,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 
 const dbPath = '/srv/db/obsidian.db';
-const dbKey = process.env.DATABASE_KEY;
+let dbKey = process.env.DATABASE_KEY;
 
 if (!fs.existsSync(dbPath)) {
   dbKey = crypto.randomBytes(32).toString('hex');
