@@ -1,3 +1,3 @@
 ## vulnerabilities
 
-please report any found vulnerabilities by email at: info@obsidian.st
+please report any found vulnerabilities by email: info@obsidian.st
