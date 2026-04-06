@@ -25,7 +25,6 @@ the server receives both the stubs calculated hash as well as the components tha
   - extensive input validation and regex
   - SPECK-128-CBC-MAC for hwid integrity verification
   - auto-delete XMR transactions after 7 days
-  - escaping inner html to prevent XSS injection
   - no emails, users identified by account numbers
 
 - **tor-over-clearnet:**
