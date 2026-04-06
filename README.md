@@ -54,8 +54,8 @@ the server receives both the stubs calculated hash as well as the components tha
 │   client    │◄────►│   proxy     │◄────►│ tor network │◄────►│  keykeeper  │
 │ (obsidian)  │      │ (port 8888) │      │ (3 relays)  │      │ (rendezvous)│
 └─────────────┘      └─────────────┘      └─────────────┘      └─────────────┘
-  ^ sends: hwid, speck-cbc-mac, hw data 
-    recieves: decryption key 
+                ^ sends: hwid, speck-cbc-mac, hw data 
+                  recieves: decryption key 
 ```
 
 ## architecture
@@ -67,7 +67,7 @@ the server receives both the stubs calculated hash as well as the components tha
                     └──────▲──────┘             │ 
                            │ <- http/https      │ <- socket.io websockets
                     ┌──────▼──────┐      ┌──────▼──────┐
-                    │   nginx     │─────►│  8888proxy  │
+                    │   nginx     │◄────►│  8888proxy  │
                     │(port 443/80)│      │ (socks5/tor)│
                     └─────────────┘      └──────▲──────┘
                                                 │ <- persistent connection
