@@ -74,8 +74,8 @@ hardware ids are computed from client machine information:
                     └──────▲──────┘             │ 
                            │ <- http/https      │ <- socket.io websockets
                     ┌──────▼──────┐      ┌──────▼──────┐
-                    │   nginx     │◄────►│  8888proxy  │
-                    │(port 443/80)│      │ (socks5/tor)│
+                    │   nginx     │◄────►│  proxy      │
+                    │(port 443/80)│      │ (port 8888) │
                     └─────────────┘      └──────▲──────┘
                                                 │ <- persistent connection
                     ┌─────────────┐      ┌──────▼──────┐
