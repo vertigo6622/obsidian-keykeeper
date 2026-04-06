@@ -22,7 +22,7 @@ if (!/^[0-9a-fA-F]{64}$/.test(dbKey)) {
 const db = new Database(dbPath);
 
 db.pragma("key = '" + dbKey + "'");
-db.pragma('cipher = aes-256-cbc');
+db.pragma('cipher = sqlcipher');
 db.pragma('kdf_iter = 256000');
 
 try {
