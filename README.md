@@ -56,7 +56,7 @@ the server receives both the stubs calculated hash as well as the components tha
                 ^ sends: hwid, speck-cbc-mac, hw data 
                   recieves: decryption key 
 ```
-hardware ids are computed from client machine information:
+**hardware ids are computed from client machine information:**
 1. stub collects machine info (hardware serials, cpuid, tpm-ek)
 2. compute SPECK-128-CBC-MAC using the user's integrity key
 3. constructs a json payload with the machine info and MAC
