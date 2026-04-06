@@ -139,7 +139,7 @@ function speckKeySchedule(key) {
 
 ### CBC-MAC
 
-CBC-MAC (cipher block chaining message authentication code) ensures message integrity:
+CBC-MAC (Cipher Block Chaining Message Authentication Code) ensures license verification integrity:
 
 1. data is padded to a multiple of 128 bits (16 bytes)
 2. each 128-bit block is XORed with the previous ciphertext
@@ -167,7 +167,7 @@ function speckCbcMac(data, keyHex) {
 hardware ids are computed from client machine information:
 1. collect machine info (CPU, memory, OS details)
 2. generate a json payload with the machine info
-3. compute SPECK-128-CBC-MAC using the user's unique SPECK key
+3. compute SPECK-128-CBC-MAC using the user's integrity key
 4. store the resulting MAC as the hardware id
 
 The hwid is verified by re-computing the MAC and comparing against the stored value using a time safe funtion to prevent timing attacks.
