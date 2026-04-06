@@ -21,6 +21,7 @@ the server receives both the stubs calculated hash as well as the components tha
 - **security and privacy:**
   - pgp-signed payment address
   - tor-over-clearnet backend
+  - encrypted user/license database (AES-256)
   - rate limiting and connection filtering
   - extensive input validation and regex
   - SPECK-128-CBC-MAC for hwid integrity verification
@@ -28,7 +29,7 @@ the server receives both the stubs calculated hash as well as the components tha
   - no emails, users identified by account numbers
 
 - **tor-over-clearnet:**
-  - socks5 proxy routes clearnet traffic through tor
+  - http -> socks5 proxy routes clearnet traffic through tor
   - increases privacy and security of the backend
   - doesn't require tor browser
 
