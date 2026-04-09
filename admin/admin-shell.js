@@ -209,12 +209,12 @@ async function handleChangeIntegrity(parts) {
 }
 
 async function handleChangeSpeckKey(parts) {
-  const acct = parts[2];
+  const lid = parts[2];
   const key = parts[3];
-  if (!acct || !key) return console.log(YELLOW + 'usage: change speck-key <account_number> <new_speck_key>' + RESET);
-  const res = await sendCommand('user:change-speck-key', { account_number: acct, new_speck_key: key });
+  if (!lid || !key) return console.log(YELLOW + 'usage: change speck-key <license_id> <new_speck_key>' + RESET);
+  const res = await sendCommand('license:change-speck-key', { license_id: lid, new_speck_key: key });
   if (res.error) return error(res.error);
-  console.log(GREEN + 'speck-key updated for ' + acct + RESET);
+  console.log(GREEN + 'speck-key updated for ' + lid + RESET);
 }
 
 async function handleResetLicenseHwid(parts) {
@@ -521,9 +521,9 @@ function printHelp(parts) {
       'lock':       'lock <account_number>',
       'unlock':     'unlock <account_number>',
       'delete':     'delete <account_number>',
-      'change':     'change password <account_number> <new_password>\n  change stub-mac <license_id> <new_stub_mac>\n  change integrity-key <license_id> <new_integrity_key>\n  change speck-key <account_number> <new_speck_key>',
+      'change':     'change password <account_number> <new_password>\n  change stub-mac <license_id> <new_stub_mac>\n  change integrity-key <license_id> <new_integrity_key>\n  change speck-key <license_id> <new_speck_key>',
       'reset':      'reset license-hwid <license_id>',
-      'debug':      'change stub-mac <license_id> <new_stub_mac>\n  change integrity-key <license_id> <new_integrity_key>\n  change speck-key <account_number> <new_speck_key>',
+      'debug':      'change stub-mac <license_id> <new_stub_mac>\n  change integrity-key <license_id> <new_integrity_key>\n  change speck-key <license_id> <new_speck_key>',
       'license':    'license info <license_id>\n  license list [user_id|all] [limit]\n  license discard <license_id>\n  license extend <license_id> [months]\n  license relink <license_id> <new_hwid>\n  license verify <license_id>',
       'discard':    'discard license <license_id>',
       'extend':     'extend license <license_id> [months]',
@@ -565,7 +565,7 @@ function printHelp(parts) {
   console.log('  extend license <license_id> [mo]   extend license');
   console.log('  relink license <id> <new_hwid>     force HWID relink');
   console.log('  verify license <license_id>        check license validity');
-  console.log('  reset license-hwid <license_id>      clear HWID for re-bind');
+  console.log('  reset license-hwid <license_id>    clear HWID for re-bind');
   console.log();
   console.log(CYAN + 'transaction management:' + RESET);
   console.log('  tx info <tx_id>                    transaction details');
@@ -626,7 +626,7 @@ function processCommand(line) {
       if (parts[1] === 'stub-mac') return handleChangeStubMac(parts);
       if (parts[1] === 'integrity-key') return handleChangeIntegrity(parts);
       if (parts[1] === 'speck-key') return handleChangeSpeckKey(parts);
-      console.log(YELLOW + 'usage: change password <account_number> <new_password> | stub-mac <license_id> <new_stub_mac> | integrity-key <license_id> <new_integrity_key> | speck-key <account_number> <new_speck_key>' + RESET);
+      console.log(YELLOW + 'usage: change password <account_number> <new_password> | stub-mac <license_id> <new_stub_mac> | integrity-key <license_id> <new_integrity_key> | speck-key <license_id> <new_speck_key>' + RESET);
       return;
     case 'reset':
       if (parts[1] === 'license-hwid') return handleResetLicenseHwid(parts);

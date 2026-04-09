@@ -27,7 +27,7 @@ const handlers = {
     return {
       id: user.id,
       account_number: user.account_number,
-      hwid: user.hwid,
+      hwid: license ? license.hwid : null,
       suspended: user.suspended,
       locked_at: user.locked_at,
       created_at: user.created_at,
@@ -199,14 +199,16 @@ const handlers = {
     return { success: true };
   },
 
-  'user:change-speck-key': async (data) => {
+  'license:change-speck-key': async (data) => {
     const validate = require('./validate');
-    const sanitized = validate.sanitizeIntegrityKey(data.new_speck_key);
-    if (!sanitized) return { error: 'Invalid speck key format. Must be 32 hex characters.' };
-    const user = db.prepare('SELECT id FROM users WHERE account_number = ?').get(data.account_number);
-    if (!user) return { error: 'User not found' };
-    db.prepare('UPDATE users SET speck_key = ? WHERE id = ?').run(sanitized, user.id);
-    logAudit('user:change-speck-key', 'user', data.account_number, null);
+    const sanitizedKey = validate.sanitizeIntegrityKey(data.new_speck_key);
+    if (!sanitizedKey) return { error: 'Invalid speck key format. Must be 32 hex characters.' };
+    const sanitizedLicenseId = validate.sanitizeLicenseId(data.license_id);
+    if (!sanitizedLicenseId) return { error: 'Invalid license ID format' };
+    const license = db.prepare('SELECT * FROM licenses WHERE license_id = ?').get(sanitizedLicenseId);
+    if (!license) return { error: 'License not found' };
+    db.prepare('UPDATE licenses SET speck_key = ? WHERE license_id = ?').run(sanitizedKey, sanitizedLicenseId);
+    logAudit('license:change-speck-key', 'license', sanitizedLicenseId, null);
     return { success: true };
   },
 
