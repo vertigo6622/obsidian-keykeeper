@@ -26,7 +26,8 @@ async function signAddress(address, amount, currency, usdAmount) {
   const key = await loadPrivateKey();
   
   const messageText = `payment address: ${address}
-amount: ${amount.toFixed(6)} ${currency} ($${usdAmount.toFixed(2)} USD)
+
+amount: ${amount.toFixed(8)} ${currency} ($${usdAmount.toFixed(2)} USD)
 
 always verify the pgp signature on this message to prevent phishing\n`;
   const message = await openpgp.createCleartextMessage({ text: messageText });
