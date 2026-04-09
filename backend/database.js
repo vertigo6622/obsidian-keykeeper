@@ -38,8 +38,6 @@ db.exec(`
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     password_hash TEXT NOT NULL,
     account_number TEXT UNIQUE NOT NULL,
-    hwid TEXT,
-    speck_key TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     last_login DATETIME,
     locked_at DATETIME,
@@ -55,6 +53,7 @@ db.exec(`
     hwid TEXT,
     stub_mac TEXT,
     integrity TEXT,
+    speck_key TEXT,
     download_filename TEXT,
     expires_at DATETIME,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -70,6 +69,7 @@ db.exec(`
     currency TEXT NOT NULL,
     amount REAL NOT NULL,
     address TEXT NOT NULL,
+    index INTEGER,
     signed_address TEXT,
     tx_hash TEXT,
     status TEXT DEFAULT 'pending',
@@ -85,7 +85,7 @@ db.exec(`
     usd_amount REAL,
     CHECK (amount > 0),
     CHECK (confirmations >= 0),
-    CHECK (status IN ('pending', 'detected', 'completing', 'completed', 'expired', 'failed')),
+    CHECK (status IN ('pending', 'detected', 'activating', 'completed', 'expired', 'failed')),
     CHECK (type IN ('purchase', 'deposit', 'withdraw'))
   );
 

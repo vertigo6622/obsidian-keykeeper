@@ -6,12 +6,12 @@ const zlib = require('zlib');
 const validate = require('./validate');
 
 const BASE_BINARIES = {
-  pro: '/srv/builds/obsidian-pro-base.exe',
-  commercial: '/srv/builds/obsidian-commercial-base.exe'
+  pro: '/srv/base/obsidian-pro-base.exe',
+  commercial: '/srv/base/obsidian-commercial-base.exe'
 };
 
 function generateRandomFilename() {
-  return 'obisidan.pro.' + crypto.randomBytes(7).toString('hex');
+  return 'obisidan.pro.' + crypto.randomBytes(7).toString('hex') + '.exe';
 }
 
 function createPackedBinary(licenseType, hwid, licenseId, callback) {
@@ -25,7 +25,7 @@ function createPackedBinary(licenseType, hwid, licenseId, callback) {
     return callback(new Error('Base binary not found'));
   }
   
-  const packerPath = '/srv/util/obs-internal.exe';
+  const packerPath = '/srv/internal/obs-internal.exe';
   const outputDir = '/tmp/packer-output-' + crypto.randomBytes(12).toString('hex'); 
   
   if (!fs.existsSync(outputDir)) {
@@ -33,7 +33,7 @@ function createPackedBinary(licenseType, hwid, licenseId, callback) {
   }
 
   const randomName = generateRandomFilename();
-  const outputPath = path.join(outputDir, randomName + '.exe');
+  const outputPath = path.join(outputDir, randomName);
   
   const args = ['--compress', '--ultra', '--fix'];
   
@@ -55,9 +55,9 @@ function createPackedBinary(licenseType, hwid, licenseId, callback) {
 
   args.push(basePath, outputPath);
   
-  console.log('Packing binary:', args.join(' '));
+  console.log('[packer] packing binary:', args.join(' '));
   
-  const proc = spawn(packerPath, args);
+  const proc = spawn('wine', [packerPath, args]);
   
   let stdout = '';
   let stderr = '';
@@ -77,7 +77,7 @@ function createPackedBinary(licenseType, hwid, licenseId, callback) {
     
     let packerOutput;
     try {
-      packerOutput = JSON.parse(stdout.trim());
+      packerOutput = JSON.parse(stderr.trim());
     } catch (e) {
       return callback(new Error('Invalid JSON output from packer: ' + stdout));
     }

@@ -82,14 +82,16 @@ async function electrumRPC(method, params = {}) {
 
 async function generateXMRAddress() {
   try {
-    const result = await moneroRPC('make_integrated_address', { payment_id: null });
+    const result = await moneroRPC('create_address', { 
+      account_index: 0 
+    });
     return {
-      address: result.integrated_address,
-      payment_id: result.payment_id
+      address: result.address,
+      subaddr_index: result.address_index
     };
   } catch (error) {
-    console.error('XMR address generation error:', error);
-    throw new Error('Failed to generate XMR address');
+    console.error('XMR subaddress generation error:', error);
+    throw new Error('Failed to generate XMR subaddress');
   }
 }
 
@@ -108,6 +110,7 @@ async function generateLTCAddress() {
 
 async function getXMRBalance() {
   try {
+    await moneroRPC('refresh', {});
     const result = await moneroRPC('get_balance', { account_index: 0 });
     return result.balance / 1e12;
   } catch (error) {
@@ -126,49 +129,38 @@ async function getLTCBalance() {
   }
 }
 
-async function getXMRBalanceByAddress(address) {
+async function getXMRBalanceByAddress(subaddrIndex) {
   try {
-    const parts = address.split(',');
-    let paymentId = null;
-    let integratedAddress = address;
+    const result = await moneroRPC('get_transfers', {
+      in: true,
+      account_index: 0,
+      subaddr_indices: [subaddrIndex]
+    });
+    if (!result.in) return 0;
     
-    if (address.length === 106) {
-      paymentId = address.slice(-64);
-      integratedAddress = address.slice(0, -65);
-    }
+    const totalPiconeros = result.in
+      .filter(transfer => !transfer.locked)
+      .reduce((sum, transfer) => sum + BigInt(transfer.amount), 0n);
     
-    const result = await moneroRPC('get_balance', { account_index: 0, address: integratedAddress });
-    return result.balance / 1e12;
+    return Number(totalPiconeros) / 1e12;
   } catch (error) {
-    console.error('XMR balance by address error:', error);
+    console.error('XMR balance error:', error);
     return 0;
   }
 }
 
-async function getXMRTransactionConfirmations(address) {
+async function getXMRTransactionConfirmations(subaddrIndex) {
   try {
     const result = await moneroRPC('get_transfers', {
       in: true,
-      pending: true,
-      account_index: 0
+      account_index: 0,
+      subaddr_indices: [subaddrIndex]
     });
+    if (!result.in || result.in.length === 0) return 0;
     
-    const pending = result.pending || [];
-    const incoming = result.in || [];
+    const transfer = result.in[0];
+    return transfer.confirmations || 0;
     
-    for (const tx of pending) {
-      if (tx.address === address) {
-        return 0;
-      }
-    }
-    
-    for (const tx of incoming) {
-      if (tx.address === address) {
-        return tx.confirmations || 0;
-      }
-    }
-    
-    return 0;
   } catch (error) {
     console.error('XMR confirmations error:', error);
     return 0;
@@ -207,7 +199,6 @@ async function sendXMR(destination, amount) {
     if (walletBalance < amount) {
       throw new Error('Insufficient wallet funds');
     }
-    
     const piconeroAmount = Math.round(amount * 1e12);
     const result = await moneroRPC('transfer', {
       destinations: [{ amount: piconeroAmount, address: destination }],
@@ -230,7 +221,6 @@ async function sendLTC(destination, amount) {
     if (walletBalance < amount) {
       throw new Error('Insufficient wallet funds');
     }
-    
     const tx = await electrumRPC('payto', {
       destination: destination,
       amount: amount,
@@ -258,6 +248,7 @@ module.exports = {
   getXMRTransactionConfirmations,
   getLTCTransactionConfirmations,
   electrumRPC,
+  moneroRPC,
   sendXMR,
   sendLTC
 };

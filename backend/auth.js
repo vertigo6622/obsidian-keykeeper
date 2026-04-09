@@ -17,15 +17,6 @@ function ror64(x, r) {
   return ((x >> r) | (x << (64n - r))) & 0xFFFFFFFFFFFFFFFFn;
 }
 
-function speckRound(x, y, k) {
-  x = ror64(x, 8n);
-  x = (x + y) & 0xFFFFFFFFFFFFFFFFn;
-  x = x ^ k;
-  y = rol64(y, 3n);
-  y = y ^ x;
-  return [x, y];
-}
-
 function speckKeySchedule(key) {
   const roundKeys = new Array(SPECK_ROUNDS);
   let b = key[1];
@@ -33,8 +24,8 @@ function speckKeySchedule(key) {
   
   for (let i = 0; i < SPECK_ROUNDS - 1; i++) {
     b = (ror64(b, 8n) + roundKeys[i]) & 0xFFFFFFFFFFFFFFFFn;
-    b = (b ^ BigInt(i)) & 0xFFFFFFFFFFFFFFFFn;
-    roundKeys[i + 1] = (rol64(roundKeys[i], 3n) ^ b) & 0xFFFFFFFFFFFFFFFFn;
+    b = (b ^ BigInt(i));
+    roundKeys[i + 1] = (rol64(roundKeys[i], 3n) ^ b);
   }
   
   return roundKeys;
@@ -43,8 +34,8 @@ function speckKeySchedule(key) {
 function speckEncryptBlock(x, y, roundKeys) {
   for (let i = 0; i < SPECK_ROUNDS; i++) {
     x = (ror64(x, 8n) + y) & 0xFFFFFFFFFFFFFFFFn;
-    x = (x ^ roundKeys[i]) & 0xFFFFFFFFFFFFFFFFn;
-    y = (rol64(y, 3n) ^ x) & 0xFFFFFFFFFFFFFFFFn;
+    x = (x ^ roundKeys[i]);
+    y = (rol64(y, 3n) ^ x);
   }
   return [x, y];
 }
@@ -73,8 +64,8 @@ function speckCbcMac(data, keyHex) {
     let block0 = dataBuffer.readBigUInt64LE(i * 16);
     let block1 = dataBuffer.readBigUInt64LE(i * 16 + 8);
     
-    block0 = (block0 ^ chain0) & 0xFFFFFFFFFFFFFFFFn;
-    block1 = (block1 ^ chain1) & 0xFFFFFFFFFFFFFFFFn;
+    block0 = (block0 ^ chain0);
+    block1 = (block1 ^ chain1);
     
     [chain0, chain1] = speckEncryptBlock(block0, block1, roundKeys);
   }
@@ -86,8 +77,8 @@ function speckCbcMac(data, keyHex) {
     let block0 = lastBlock.readBigUInt64LE(0);
     let block1 = lastBlock.readBigUInt64LE(8);
     
-    block0 = (block0 ^ chain0) & 0xFFFFFFFFFFFFFFFFn;
-    block1 = (block1 ^ chain1) & 0xFFFFFFFFFFFFFFFFn;
+    block0 = (block0 ^ chain0);
+    block1 = (block1 ^ chain1);
     
     [chain0, chain1] = speckEncryptBlock(block0, block1, roundKeys);
   }
@@ -361,7 +352,7 @@ function updateLastLogin(userId) {
 
 function getLicenseByUserId(userId) {
   const stmt = db.prepare(`
-    SELECT license_id, type, expires_at FROM licenses 
+    SELECT license_id, type, expires_at, hwid FROM licenses 
     WHERE user_id = ? ORDER BY created_at DESC LIMIT 1
   `);
   return stmt.get(userId);
@@ -369,7 +360,7 @@ function getLicenseByUserId(userId) {
 
 function getLicenseById(licenseId) {
   const stmt = db.prepare(`
-    SELECT l.license_id, l.type, l.expires_at, l.user_id, l.hwid as license_hwid, l.stub_mac, l.integrity, u.account_number, u.hwid as user_hwid, u.speck_key
+    SELECT l.license_id, l.type, l.expires_at, l.user_id, l.hwid, l.stub_mac, l.integrity, l.speck_key, u.account_number
     FROM licenses l
     JOIN users u ON l.user_id = u.id
     WHERE l.license_id = ?
@@ -379,11 +370,13 @@ function getLicenseById(licenseId) {
 
 function createLicense(userId, type, hwid, stubMac) {
   const licenseId = generateLicenseId();
+  console.log('[auth] license id generated:', licenseId);
   const stmt = db.prepare(`
     INSERT INTO licenses (license_id, user_id, type, hwid, stub_mac, expires_at)
     VALUES (?, ?, ?, ?, ?, datetime('now', '+6 months'))
   `);
   stmt.run(licenseId, userId, type, hwid, stubMac);
+  console.log('[auth] license created', licenseId);
   return licenseId;
 }
 
@@ -479,19 +472,19 @@ function cleanupOldSessions() {
 }
 
 function getSpeckKey(userId) {
-  const stmt = db.prepare(`SELECT speck_key FROM users WHERE id = ?`);
-  const user = stmt.get(userId);
-  return user ? user.speck_key : null;
+  const stmt = db.prepare(`SELECT speck_key FROM licenses WHERE user_id = ? ORDER BY created_at DESC LIMIT 1`);
+  const license = stmt.get(userId);
+  return license ? license.speck_key : null;
 }
 
-function updateUserSpeckKey(userId, key) {
-  const stmt = db.prepare(`UPDATE users SET speck_key = ? WHERE id = ?`);
-  stmt.run(key, userId);
+function updateLicenseSpeckKey(licenseId, key) {
+  const stmt = db.prepare(`UPDATE licenses SET speck_key = ? WHERE license_id = ?`);
+  stmt.run(key, licenseId);
 }
 
 function getUserByLicenseId(licenseId) {
   const stmt = db.prepare(`
-    SELECT u.id, u.account_number, u.speck_key 
+    SELECT u.id, u.account_number 
     FROM users u
     JOIN licenses l ON u.id = l.user_id
     WHERE l.license_id = ?
@@ -526,7 +519,6 @@ module.exports = {
   cleanupOldSessions,
   verifyHwidIntegrity,
   getSpeckKey,
-  updateUserSpeckKey,
   computeHwidFromMachineInfo,
   getUserByLicenseId,
   getUserByAccountNumber,
@@ -549,7 +541,8 @@ module.exports = {
   cleanupOldWithdrawRateLimits,
   getAccountStanding,
   generateAuthToken,
-  validateAuthToken
+  validateAuthToken,
+  updateLicenseSpeckKey
 };
 
 const RELINK_RATE_LIMIT = 10;

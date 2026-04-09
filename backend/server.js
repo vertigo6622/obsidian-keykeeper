@@ -37,7 +37,7 @@ const cspDirectives = {
   formAction: ["'self'"]
 };
 
-if (!process.env.NODE_ENV !== 'production') {
+if (!process.env.NODE_ENV === 'production') {
   cspDirectives.upgradeInsecureRequests = [];
 }
 
@@ -54,12 +54,13 @@ app.use(helmet({
 
 const server = http.createServer(app);
 
+const DEPOSITS_ENABLED = false;
+const WITHDRAWALS_ENABLED = false;
 const MIN_ACCOUNT_AGE_HOURS = 24;
-const ORIGINS = 'https://obsidian.st,https://verify.obsidian.st,http://127.0.0.1:8000,http://206.245.132.222'; 
 
 const io = new Server(server, {
   cors: {
-    origin: ORIGINS,
+    origin: '*',
     methods: ["GET", "POST"],
     credentials: true
   },
@@ -90,12 +91,10 @@ const sessionMiddleware = session({
 app.use(sessionMiddleware);
 
 io.use((socket, next) => {
-  console.log('Socket.io session middleware - socket id:', socket.id);
+  console.log('[keykeeper]Socket.io session middleware - socket id:', socket.id);
   sessionMiddleware(socket.request, socket.request.res || {}, (err) => {
     if (err) {
       console.error('Session middleware error:', err);
-    } else {
-      console.log('Session middleware OK - sessionID:', socket.request.sessionID);
     }
     next(err);
   });
@@ -142,7 +141,7 @@ app.get('/keykeeper/status', async (req, res) => {
 
 app.post('/keykeeper/product/verify', async (req, res) => {
   try {
-    console.log('[auth] product verification request:', req.body);
+    console.log('[keykeeper][auth] product verification request:', req.body);
     const mapped = {
       license: req.body['0'],
       cpu: req.body['1'],
@@ -160,27 +159,27 @@ app.post('/keykeeper/product/verify', async (req, res) => {
     }
     
     if (!license || !sum || !cpu || !disk || !mac || !ram || !tpm) {
-      console.log('Failed HWID validation: missing fields');
+      console.log('[keykeeper] failed HWID validation: missing fields');
       auth.logProductVerification(license || 'unknown', sessionId, false);
       return res.json({ valid: false, error: 'license, sum, cpu, disk, mac, and ram required' });
     }
         
     const licenseData = auth.getLicenseById(license);
     if (!licenseData) {
-      console.log('Failed HWID validation: missing license');
+      console.log('[keykeeper] failed HWID validation: missing license');
       auth.logProductVerification(license, sessionId, false);
       return res.json({ valid: false, error: 'License not found' });
     }
     
     const standing = auth.getAccountStanding(licenseData.user_id);
     if (!standing.exists || standing.locked || standing.suspended) {
-      console.log('Failed HWID validation: account not in good standing | id:', licenseData.user_id);
+      console.log('[keykeeper] failed HWID validation: account not in good standing | id:', licenseData.user_id);
       auth.logProductVerification(license, sessionId, false);
       return res.json({ valid: false, error: 'Account not in good standing' });
     }
     
     if (new Date(licenseData.expires_at) < new Date()) {
-      console.log('Failed HWID validation: License expired', licenseData.user_id);
+      console.log('[keykeeper] failed HWID validation: License expired', licenseData.user_id);
       auth.logProductVerification(license, sessionId, false);
       return res.json({ valid: false, error: 'License expired' });
     }
@@ -191,9 +190,9 @@ app.post('/keykeeper/product/verify', async (req, res) => {
         return res.json(result);
       }
       
-      const decryptionKey = auth.getSpeckKey(licenseData.user_id);
+      const decryptionKey = licenseData.speck_key;
       auth.logProductVerification(license, sessionId, true);
-      
+    
       res.json({
         valid: true,
         type: result.type,
@@ -225,7 +224,7 @@ app.post('/keykeeper/product/create', (req, res) => {
   }
   
   const licenseType = license.type;
-  const hwid = license.license_hwid || null;
+  const hwid = license.hwid || null;
   
   packer.createPackedBinary(licenseType, hwid, license_id, (err, result) => {
     if (err) {
@@ -235,7 +234,7 @@ app.post('/keykeeper/product/create', (req, res) => {
     
     auth.updateLicenseDownloadFilename(license_id, result.filename);
     auth.updateLicenseStubMac(license_id, result.mac);
-    auth.updateUserSpeckKey(userId, result.key);
+    auth.updateLicenseSpeckKey(license_id, result.key);
     auth.updateLicenseIntegrity(license_id, result.integrity);
     
     res.setHeader('Content-Type', 'application/exe');
@@ -253,8 +252,7 @@ io.on('error', (err) => {
 });
 
 io.on('connection', (socket) => {
-  console.log('Client connected:', socket.id);
-  console.log('Session data:', socket.request.session);
+  console.log('[keykeeper] client connected:', socket.id);
   
   socket.on('error', (err) => {
     console.error('Socket error:', socket.id, err);
@@ -265,7 +263,7 @@ io.on('connection', (socket) => {
   const checkIdle = () => {
     if (socket.request.session && socket.request.session.userId) {
       if (Date.now() - lastActivity > IDLE_TIMEOUT_MS) {
-        console.log('Client idle timeout:', socket.id);
+        console.log('[keykeeper]Client idle timeout:', socket.id);
         socket.emit('session:timeout', { message: 'Session expired due to inactivity' });
         socket.request.session.destroy();
         socket.disconnect(true);
@@ -281,12 +279,11 @@ io.on('connection', (socket) => {
   
   socket.on('disconnect', () => {
     clearInterval(idleInterval);
-    console.log('Client disconnected:', socket.id);
+    console.log('[keykeeper] client disconnected:', socket.id);
   });
   
   if (socket.request.session && socket.request.session.userId) {
     socket.join('user_' + socket.request.session.userId);
-    console.log('Socket joined room: user_' + socket.request.session.userId);
   }
 
   socket.on('auth:register', async (data, callback) => {
@@ -328,20 +325,20 @@ io.on('connection', (socket) => {
       const sanitizedPassword = validate.sanitizePassword(password);
       const sessionId = socket.request.session.id || 'unknown';
       
-      console.log('[keykeeper] Login attempt - account_number:', sanitizedAccountNumber);
+      console.log('[keykeeper] login attempt - account_number:', sanitizedAccountNumber);
       
       if (!sanitizedAccountNumber) {
-        console.log('Login failed: invalid account number');
+        console.log('[keykeeper]Login failed: invalid account number');
         return callback({ success: false, error: 'Invalid account number format' });
       }
       
       if (!sanitizedPassword) {
-        console.log('Login failed: password issue, length:', password ? password.length : 'undefined');
+        console.log('[keykeeper]Login failed: password issue, length:', password ? password.length : 'undefined');
         return callback({ success: false, error: 'Password must be 8-128 characters' });
       }
       
       if (auth.isLoginRateLimited(sessionId)) {
-        console.log('Login failed: rate limited');
+        console.log('[keykeeper]Login failed: rate limited');
         return callback({ success: false, error: 'Too many login attempts. Try again later.' });
       }
       
@@ -403,7 +400,7 @@ io.on('connection', (socket) => {
       account_number: user.account_number,
       license: license ? license.type : 'none',
       license_id: license ? license.license_id : null,
-      hwid: user.hwid,
+      hwid: license ? license.hwid : null,
       license_status: license && new Date(license.expires_at) > new Date() ? 'active' : 'expired',
       balance,
       pending_transaction: pendingTx || null
@@ -443,7 +440,7 @@ io.on('connection', (socket) => {
       const transaction = await tx.createTransaction(userId, sanitizedCurrency, sanitizedLicenseType, hwid, sanitizedStubMac);
       auth.addTxCreateAttempt(userId);
 
-      console.log('[keykeeper] transaction created. user id:', userId, 'currency:', sanitizedCurrency, 'license type:', licenseType);
+      console.log('[keykeeper][keykeeper] transaction created. user id:', userId, 'currency:', sanitizedCurrency, 'license type:', licenseType);
 
       callback({ success: true, ...transaction });
     } catch (error) {
@@ -453,6 +450,10 @@ io.on('connection', (socket) => {
   });
 
   socket.on('tx:deposit', async (data, callback) => {
+    if (!DEPOSITS_ENABLED) {
+      return callback({ success: false, error: 'Deposits are currently disabled' });
+    }
+    
     const userId = socket.request.session.userId;
     if (!userId) {
       return callback({ error: 'Not authenticated' });
@@ -484,7 +485,7 @@ io.on('connection', (socket) => {
       const transaction = await tx.createDepositTransaction(userId, sanitizedCurrency, sanitizedAmount);
       auth.addTxCreateAttempt(userId);
 
-      console.log('[keykeeper] deposit transaction created. user id:', userId, 'currency:', sanitizedCurrency, 'amount', sanitizedAmount);
+      console.log('[keykeeper][keykeeper] deposit transaction created. user id:', userId, 'currency:', sanitizedCurrency, 'amount', sanitizedAmount);
 
       callback({ success: true, ...transaction });
     } catch (error) {
@@ -494,6 +495,10 @@ io.on('connection', (socket) => {
   });
   
   socket.on('tx:withdraw', async (data, callback) => {
+    if (!WITHDRAWALS_ENABLED) {
+      return callback({ success: false, error: 'Withdrawals are currently disabled' });
+    }
+    
     const userId = socket.request.session.userId;
     if (!userId) {
       return callback({ error: 'Not authenticated' });
@@ -534,7 +539,7 @@ io.on('connection', (socket) => {
       const transaction = await tx.createWithdrawTransaction(userId, sanitizedCurrency, sanitizedAmount, sanitizedAddress);
       auth.addWithdrawAttempt(userId, sanitizedCurrency);
       
-      console.log('[keykeeper] withdraw transaction created. user id:', userId, 'currency:', sanitizedCurrency, 'amount:', sanitizedAmount);
+      console.log('[keykeeper][keykeeper] withdraw transaction created. user id:', userId, 'currency:', sanitizedCurrency, 'amount:', sanitizedAmount);
       
       callback({ success: true, tx_id: transaction.tx_id, tx_hash: transaction.tx_hash });
     } catch (error) {
@@ -604,7 +609,7 @@ io.on('connection', (socket) => {
       return callback({ error: 'Can only relink once per month' });
     }
     
-    const speckKey = auth.getSpeckKey(userId);
+    const speckKey = license.speck_key;
     
     callback({
       success: true,
@@ -729,8 +734,8 @@ if (!fs.existsSync(dataDir)) {
 }
 
 server.listen(PORT, '127.0.0.1', () => {
-  console.log('[keykeeper] obsidian backend running on port ' + PORT);
-  console.log('[keykeeper] pgp key path: ' + (process.env.PGP_KEY_PATH || '/srv/pgp/key.asc'));
+  console.log('[keykeeper][keykeeper] obsidian backend running on port ' + PORT);
+  console.log('[keykeeper][keykeeper] pgp key path: ' + (process.env.PGP_KEY_PATH || '/srv/pgp/key.asc'));
   adminIpc.startIPCServer();
   pgp.loadPrivateKey();
   
@@ -745,7 +750,7 @@ server.listen(PORT, '127.0.0.1', () => {
   }, 30000);
   
   wallet.getExchangeRates().then(rates => {
-    console.log('[keykeeper] initial exchange rates:', rates);
+    console.log('[keykeeper][keykeeper] initial exchange rates:', rates);
   });
   setInterval(() => {
     wallet.getExchangeRates();
