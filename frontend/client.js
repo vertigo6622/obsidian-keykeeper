@@ -3,6 +3,9 @@ let currentUser = null;
 let lastTabBeforeLicense = 'tab-purchase';
 let lastTabBeforePro = 'tab-about';
 
+const DEPOSITS_ENABLED = false;
+const WITHDRAWALS_ENABLED = false;
+
 function setLastTabBeforePro() {
   const checked = document.querySelector('input[name="tabs"]:checked');
   const currentTab = checked ? checked.id : 'tab-about';
@@ -35,6 +38,9 @@ function connectToBackend() {
   
   socket.on('connect_error', (err) => {
     console.error('Connection error:', err);
+    document.querySelectorAll('.tx-section, .tx-title, .tx-grid').forEach(function(el) {
+      el.style.display = 'none';
+    });
     document.querySelector('.tx-loading').style.display = 'none';
     document.querySelector('.tx-disconnected').style.display = 'block';
   });
@@ -59,7 +65,7 @@ function connectToBackend() {
         panel.innerHTML = `
           <label class="back-btn" for="tab-payment">&lt; back</label>
           <h1>Processing Payment</h1>
-          <p>tx id: ${data.tx_id}</p>
+          <p>txhash: ${data.tx_id}</p>
           <p>amount: ${data.amount} ${data.currency}</p>
           <p>waiting for confirmations<span class="loader"><span>.</span><span>.</span><span>.</span></span></p>
           <p style="margin-top: 10px;> feel free to do something else while it confirms. your license will be issued automatically when it reaches the confirmation target.<p>
@@ -416,22 +422,6 @@ function displayTransaction(tx) {
   }
 }
 
-function doWithdraw(currency, amount, address) {
-  socket.emit('tx:withdraw', { currency, amount, address }, (response) => {
-    if (response.success) {
-      const panel = document.getElementById('panel-withdrawing');
-      panel.innerHTML = `
-        <label class="back-btn" for="tab-withdraw">&lt; back</label>
-        <h1>Withdrawing</h1>
-        <p>broadcasting transaction<span class="loader"><span>.</span><span>.</span><span>.</span></span></p>
-        <p style="margin-top: 10px;">transaction id: ${response.tx_id}</p>
-      `;
-    } else {
-      alert(response.error || 'Withdrawal failed');
-    }
-  });
-}
-
 function getTransactionHistory() {
   socket.emit('history:get', {}, (response) => {
     if (response.history) {
@@ -544,7 +534,6 @@ window.obsidianClient = {
   register: doRegister,
   verifyLicense,
   createTransaction,
-  withdraw: doWithdraw,
   getHistory: getTransactionHistory,
   relink: doRelink,
   canRelink: canRelink,

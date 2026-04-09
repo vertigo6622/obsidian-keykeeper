@@ -2,17 +2,18 @@ const express = require('express');
 const http = require('http');
 const httpProxy = require('http-proxy');
 const { SocksProxyAgent } = require('socks-proxy-agent');
+const helmet = require('helmet');
 
 const app = express();
 
 app.disable('x-powered-by');
 app.disable('etag');
+app.use(helmet());
 
 const ONION_ADDRESS = process.env.ONION_ADDRESS;
 const ONION_PORT = parseInt(process.env.ONION_PORT || '3000');
 const SOCKS_PROXY = process.env.SOCKS_PROXY || '127.0.0.1:9050';
 const PORT = parseInt(process.env.PROXY_PORT || '8888');
-const STATUS_PORT = parseInt(process.env.STATUS_PORT || '4444');
 
 if (!ONION_ADDRESS) {
   console.error('ONION_ADDRESS env var required');
@@ -24,52 +25,58 @@ if (!ONION_ADDRESS.endsWith('.onion')) {
   process.exit(1);
 }
 
-const ALLOWED_ORIGINS = [
-  'http://localhost',
-  'http://localhost:3000',
-  'http://localhost:8080',
-  'http://localhost:8000',
-  'http://127.0.0.1',
-  'http://127.0.0.1:3000',
-  'http://127.0.0.1:8080',
-  'http://127.0.0.1:8000',
-  'http://127.0.0.1:' + PORT,
-  'https://obsidian.st',
-  'https://verify.obsidian.st'
-];
-
-function isOriginAllowed(headers) {
-  const referer = headers.referer || '';
-  const origin = headers.origin || '';
-  const host = headers.host || '';
-
-  const checkUrl = (url) => {
-    return ALLOWED_ORIGINS.some(allowed =>
-      url.startsWith(allowed) || url === allowed
-    );
-  };
-
-  return checkUrl(referer) || checkUrl(origin) || checkUrl('http://' + host);
-}
-
-const BLOCKED_BOTS = [
-  'bot', 'crawler', 'spider', 'googlebot', 'bingbot',
-  'slurp', 'duckduckbot', 'yandex', 'baidu', 'sogou',
-  'facebookexternalhit', 'twitterbot', 'applebot', 'semrush',
-  'ahrefs', 'mj12bot', 'dotbot', 'rogerbot', 'screaming frog'
-];
-
 const RATE_LIMIT_WINDOW = 60 * 60 * 1000;
-const RATE_LIMIT_MAX = 100;
+const RATE_LIMIT_MAX = 60;
+const MAX_CONCURRENT = 5;
+const MAX_BODY_BYTES = 1024 * 1024;
 
 const rateLimitMap = new Map();
+const concurrentMap = new Map();
 
 setInterval(() => {
   const cutoff = Date.now() - RATE_LIMIT_WINDOW;
   for (const [key, val] of rateLimitMap) {
     if (val.windowStart < cutoff) rateLimitMap.delete(key);
   }
-}, RATE_LIMIT_WINDOW);
+  for (const [key, val] of concurrentMap) {
+    if (Date.now() - val.lastSeen > 300000) concurrentMap.delete(key);
+  }
+}, 60000);
+
+function getClientIp(req) {
+  return req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket.remoteAddress;
+}
+
+function checkRateLimit(ip) {
+  const now = Date.now();
+  let entry = rateLimitMap.get(ip);
+
+  if (!entry || now - entry.windowStart >= RATE_LIMIT_WINDOW) {
+    entry = { windowStart: now, count: 0 };
+    rateLimitMap.set(ip, entry);
+  }
+
+  entry.count++;
+  const remaining = Math.max(0, RATE_LIMIT_MAX - entry.count);
+  const retryAfter = entry.count > RATE_LIMIT_MAX
+    ? Math.ceil((RATE_LIMIT_WINDOW - (now - entry.windowStart)) / 1000)
+    : 0;
+
+  return { allowed: entry.count <= RATE_LIMIT_MAX, remaining, retryAfter };
+}
+
+function trackConcurrent(ip) {
+  if (!concurrentMap.has(ip)) concurrentMap.set(ip, { count: 0, lastSeen: Date.now() });
+  const entry = concurrentMap.get(ip);
+  entry.count++;
+  entry.lastSeen = Date.now();
+  return entry.count;
+}
+
+function releaseConcurrent(ip) {
+  const entry = concurrentMap.get(ip);
+  if (entry) entry.count = Math.max(0, entry.count - 1);
+}
 
 const socksAgent = new SocksProxyAgent('socks5h://' + SOCKS_PROXY);
 
@@ -84,7 +91,7 @@ const socketio_proxy = httpProxy.createProxyServer({
 });
 
 socketio_proxy.on('error', (err, req, res) => {
-  console.error('[PROXY ERROR]', req.method, req.url, err.code || '', err.message);
+  console.error('[proxy] error:', req.method, req.url, err.code || '', err.message);
   if (res && !res.headersSent) {
     res.writeHead(502, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ error: 'Bad Gateway' }));
@@ -102,7 +109,7 @@ const kkproxy = httpProxy.createProxyServer({
 });
 
 kkproxy.on('error', (err, req, res) => {
-  console.error('[PROXY ERROR]', req.method, req.url, err.code || '', err.message);
+  console.error('[proxy] error:', req.method, req.url, err.code || '', err.message);
   if (res && !res.headersSent) {
     res.writeHead(502, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ error: 'Bad Gateway' }));
@@ -110,40 +117,46 @@ kkproxy.on('error', (err, req, res) => {
 });
 
 app.use((req, res, next) => {
-  if (!isOriginAllowed(req.headers)) {
-    console.log('Blocked request from:', req.headers.origin, req.headers.referer, req.ip);
-    return res.status(403).json({ error: 'Forbidden' });
+  const ip = getClientIp(req);
+  const contentLength = parseInt(req.headers['content-length'] || '0');
+
+  if (contentLength > MAX_BODY_BYTES) {
+    return res.status(413).json({ error: 'Payload Too Large' });
   }
 
-  const ua = (req.headers['user-agent'] || '').toLowerCase();
-  const isBot = BLOCKED_BOTS.some(bot => ua.includes(bot));
-  if (isBot) {
-    return res.status(403).send();
+  const concurrent = concurrentMap.get(ip);
+  if (concurrent && concurrent.count >= MAX_CONCURRENT) {
+    return res.status(429).json({ error: 'Too Many Concurrent Connections' });
   }
 
+  const rate = checkRateLimit(ip);
+  if (!rate.allowed) {
+    res.set('Retry-After', rate.retryAfter);
+    return res.status(429).json({ error: 'Too Many Requests', retryAfter: rate.retryAfter });
+  }
+
+  res.set('X-RateLimit-Remaining', rate.remaining);
+  trackConcurrent(ip);
+  res.on('finish', () => releaseConcurrent(ip));
   next();
 });
 
-app.use('/keykeeper', (req, res) => {
-  const apiKey = req.headers['x-api-key'];
-  if (apiKey) {
-    const now = Date.now();
-    const windowStart = now - RATE_LIMIT_WINDOW;
-    let record = rateLimitMap.get(apiKey);
-    if (!record || record.windowStart < windowStart) {
-      record = { windowStart: now, count: 0 };
-    }
-    record.count++;
-    rateLimitMap.set(apiKey, record);
-    if (record.count > RATE_LIMIT_MAX) {
-      return res.status(429).send();
-    }
-  }
+const requestHistory = new Array(1440).fill(0);
 
+setInterval(() => {
+  const total24h = requestHistory.reduce((sum, count) => sum + count, 0);
+  console.log(`[proxy] stats: forwarded ${total24h} requests in the last 24 hours.`);
+  requestHistory.shift();
+  requestHistory.push(0);
+}, 300000);
+
+app.use('/keykeeper', (req, res) => {
+  requestHistory[requestHistory.length - 1]++; 
   kkproxy.web(req, res);
 });
 
 app.use('/socket.io', (req, res) => {
+  requestHistory[requestHistory.length - 1]++; 
   socketio_proxy.web(req, res);
 });
 
@@ -153,18 +166,21 @@ const server = http.createServer(app);
 
 server.on('upgrade', (req, socket, head) => {
   if (req.url.startsWith('/socket.io/')) {
-    if (!isOriginAllowed(req.headers)) {
-      console.log('Blocked WS upgrade from:', req.headers.origin);
+    const ip = req.socket.remoteAddress;
+    const concurrent = concurrentMap.get(ip);
+    if (concurrent && concurrent.count >= MAX_CONCURRENT) {
       socket.end();
       return;
     }
+    trackConcurrent(ip);
+    socket.on('close', () => releaseConcurrent(ip));
     socketio_proxy.ws(req, socket, head);
   } else {
     socket.end();
   }
 });
 
-server.listen(PORT, '127.0.0.1', () => {
-  console.log('Proxy running on 127.0.0.1:' + PORT);
-  console.log('Forwarding /socket.io/* and /keykeeper/* to ' + ONION_ADDRESS + ':' + ONION_PORT + ' via SOCKS ' + SOCKS_PROXY);
+server.listen(PORT, '0.0.0.0', () => {
+  console.log('[proxy] proxy running on 0.0.0.0:' + PORT);
+  console.log('[proxy] forwarding to keykeeper on port:' + ONION_PORT + ' via SOCKS ' + SOCKS_PROXY);
 });
