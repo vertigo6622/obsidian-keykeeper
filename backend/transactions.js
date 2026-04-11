@@ -95,7 +95,7 @@ async function createTransaction(userId, currency, licenseType, hwid, stubMac = 
 async function activateLicense(transactionId) {
   try {
     const lockStmt = db.prepare('UPDATE transactions SET status = ? WHERE id = ? AND status IN (?, ?)');
-    const lockResult = lockStmt.run('activating', transactionId, 'pending');
+    const lockResult = lockStmt.run('activating', transactionId, 'pending', 'confirmed');
     
     if (lockResult.changes === 0) {
       return { success: false, error: 'Transaction already processed' };
@@ -396,6 +396,8 @@ async function checkPendingPayments() {
             account_index: 0,
             subaddr_indices: [tx.subaddr_index]
           });
+
+          /* BLOCKCHAIN TXID NOT YET TESTED SERVERSIDE */
           const blockchainTxId = transferResult.in[0].txid;
 
           if (!tx.detected_at) {

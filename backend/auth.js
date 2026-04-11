@@ -161,6 +161,7 @@ function verifyHwidIntegrity(licenseId, sum, cpu, disk, mac, ram, tpm, callback)
   }
 }
 
+/* TEST THIS */
 function computeHwidFromMachineInfo(machineInfo, license) {
   if (!license.integrity || !license.stub_mac) {
     console.error('Missing integrity or stub_mac in license');
@@ -440,7 +441,7 @@ async function changePassword(userId, oldPassword, newPassword) {
   const valid = await bcrypt.compare(oldPassword, userWithHash.password_hash);
   if (!valid) return { success: false, error: 'Invalid password' };
   
-  const newHash = bcrypt.hash(newPassword, 10);
+  const newHash = await bcrypt.hash(newPassword, 10);
   db.prepare(`UPDATE users SET password_hash = ? WHERE id = ?`).run(newHash, userId);
   return { success: true };
 }
@@ -542,7 +543,9 @@ module.exports = {
   getAccountStanding,
   generateAuthToken,
   validateAuthToken,
-  updateLicenseSpeckKey
+  updateLicenseSpeckKey,
+  lockAccount,
+  unlockAccount
 };
 
 const RELINK_RATE_LIMIT = 10;

@@ -1,10 +1,14 @@
 const fetch = global.fetch || require('node-fetch');
+const { SocksProxyAgent } = require('socks-proxy-agent');
 
 const MONERO_RPC_URL = 'http://127.0.0.1:4331/json_rpc';
 const ELECTRUM_LTC_URL = 'http://127.0.0.1:50001';
 
 let cachedRates = { xmr: 0, ltc: 0, lastUpdate: 0, available: false };
 const RATE_CACHE_MS = 5 * 60 * 1000;
+
+const TOR_SOCKS_PROXY = process.env.TOR_SOCKS_PROXY || '127.0.0.1:9050';
+const torAgent = new SocksProxyAgent('socks5h://' + TOR_SOCKS_PROXY);
 
 async function getExchangeRates() {
   const now = Date.now();
@@ -13,13 +17,13 @@ async function getExchangeRates() {
   }
   
   try {
-    const apiKey = process.env.COINGECKO_API_KEY;
+    const apiKey = process.env.COINGECKO_API_KEY; 
     let url = 'https://api.coingecko.com/api/v3/simple/price?vs_currencies=usd&ids=monero,litecoin&names=Monero,Litecoin&symbols=xmr,ltc';
     if (apiKey) {
       url += '?x_cg_demo_api_key=' + apiKey;
     }
     
-    const response = await fetch(url);
+    const response = await fetch(url, { agent: torAgent });
 
     if (!response.ok) {
       console.error('CoinGecko error:', response.status, await response.text());

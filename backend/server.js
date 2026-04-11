@@ -37,19 +37,17 @@ const cspDirectives = {
   formAction: ["'self'"]
 };
 
-if (!process.env.NODE_ENV === 'production') {
-  cspDirectives.upgradeInsecureRequests = [];
-}
+cspDirectives.upgradeInsecureRequests = [];
 
 app.use(helmet({
   contentSecurityPolicy: {
     directives: cspDirectives
   },
-  //hsts: {                   // enable when going live
-  //  maxAge: 31536000,
-  //  includeSubDomains: true,
-  //  preload: true
-  //}
+  hsts: {
+    maxAge: 31536000,
+    includeSubDomains: true,
+    preload: true
+  }
 }));
 
 const server = http.createServer(app);
@@ -81,7 +79,7 @@ const sessionMiddleware = session({
   resave: false,
   saveUninitialized: false,
   cookie: {
-    secure: false,              // set true when going live
+    secure: true,
     httpOnly: true,
     maxAge: 24 * 60 * 60 * 1000,
     sameSite: 'strict'
@@ -350,18 +348,18 @@ io.on('connection', (socket) => {
       }
       
       if (auth.isAccountLocked(user.id)) {
-        return callback({ success: false, error: 'Account locked. Contact support.' });
+        return callback({ success: false, error: 'account locked. contact support.' });
       }
       
       if (auth.isAccountSuspended(user.id)) {
-        return callback({ success: false, error: 'Account suspended. contact support.' });
+        return callback({ success: false, error: 'account suspended. contact support.' });
       }
       
       const valid = await auth.verifyPassword(sanitizedPassword, user.password_hash);
       if (!valid) {
         auth.addFailedLoginAttempt(user.id, sessionId);
         const attemptsLeft = 5 - auth.getFailedLoginAttempts(user.id);
-        return callback({ success: false, error: 'Invalid credentials. ' + attemptsLeft + ' attempts remaining.' });
+        return callback({ success: false, error: 'Invalid credentials.' });
       }
       
       auth.clearFailedLoginAttempts(user.id);
@@ -440,7 +438,7 @@ io.on('connection', (socket) => {
       const transaction = await tx.createTransaction(userId, sanitizedCurrency, sanitizedLicenseType, hwid, sanitizedStubMac);
       auth.addTxCreateAttempt(userId);
 
-      console.log('[keykeeper][keykeeper] transaction created. user id:', userId, 'currency:', sanitizedCurrency, 'license type:', licenseType);
+      console.log('[keykeeper] transaction created. user id:', userId, 'currency:', sanitizedCurrency, 'license type:', licenseType);
 
       callback({ success: true, ...transaction });
     } catch (error) {
@@ -485,7 +483,7 @@ io.on('connection', (socket) => {
       const transaction = await tx.createDepositTransaction(userId, sanitizedCurrency, sanitizedAmount);
       auth.addTxCreateAttempt(userId);
 
-      console.log('[keykeeper][keykeeper] deposit transaction created. user id:', userId, 'currency:', sanitizedCurrency, 'amount', sanitizedAmount);
+      console.log('[keykeeper] deposit transaction created. user id:', userId, 'currency:', sanitizedCurrency, 'amount', sanitizedAmount);
 
       callback({ success: true, ...transaction });
     } catch (error) {
@@ -539,7 +537,7 @@ io.on('connection', (socket) => {
       const transaction = await tx.createWithdrawTransaction(userId, sanitizedCurrency, sanitizedAmount, sanitizedAddress);
       auth.addWithdrawAttempt(userId, sanitizedCurrency);
       
-      console.log('[keykeeper][keykeeper] withdraw transaction created. user id:', userId, 'currency:', sanitizedCurrency, 'amount:', sanitizedAmount);
+      console.log('[keykeeper] withdraw transaction created. user id:', userId, 'currency:', sanitizedCurrency, 'amount:', sanitizedAmount);
       
       callback({ success: true, tx_id: transaction.tx_id, tx_hash: transaction.tx_hash });
     } catch (error) {
@@ -689,7 +687,7 @@ io.on('connection', (socket) => {
 callback({ canRelink: auth.canRelink(sanitizedLicenseId) });
   });
   
-  socket.on('user:changePassword', (data, callback) => {
+  socket.on('user:changePassword', async (data, callback) => {
     const userId = socket.request.session.userId;
     if (!userId) {
       return callback({ error: 'Not authenticated' });
@@ -703,11 +701,11 @@ callback({ canRelink: auth.canRelink(sanitizedLicenseId) });
       return callback({ error: 'Password must be 8-128 characters' });
     }
     
-    const result = auth.changePassword(userId, sanitizedOldPassword, sanitizedNewPassword);
+    const result = await auth.changePassword(userId, sanitizedOldPassword, sanitizedNewPassword);
     callback(result);
   });
   
-  socket.on('user:deleteAccount', (data, callback) => {
+  socket.on('user:deleteAccount', async (data, callback) => {
     const userId = socket.request.session.userId;
     if (!userId) {
       return callback({ error: 'Not authenticated' });
@@ -720,7 +718,7 @@ callback({ canRelink: auth.canRelink(sanitizedLicenseId) });
       return callback({ error: 'Invalid password' });
     }
     
-    const result = auth.deleteAccount(userId, sanitizedPassword);
+    const result = await auth.deleteAccount(userId, sanitizedPassword);
     if (result.success) {
       socket.request.session.destroy();
     }
@@ -734,8 +732,8 @@ if (!fs.existsSync(dataDir)) {
 }
 
 server.listen(PORT, '127.0.0.1', () => {
-  console.log('[keykeeper][keykeeper] obsidian backend running on port ' + PORT);
-  console.log('[keykeeper][keykeeper] pgp key path: ' + (process.env.PGP_KEY_PATH || '/srv/pgp/key.asc'));
+  console.log('[keykeeper] obsidian backend running on port ' + PORT);
+  console.log('[keykeeper] pgp key path: ' + (process.env.PGP_KEY_PATH || '/srv/pgp/key.asc'));
   adminIpc.startIPCServer();
   pgp.loadPrivateKey();
   
@@ -750,7 +748,7 @@ server.listen(PORT, '127.0.0.1', () => {
   }, 30000);
   
   wallet.getExchangeRates().then(rates => {
-    console.log('[keykeeper][keykeeper] initial exchange rates:', rates);
+    console.log('[keykeeper] initial exchange rates:', rates);
   });
   setInterval(() => {
     wallet.getExchangeRates();

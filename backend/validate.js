@@ -62,8 +62,7 @@ function isValidLTCAddress(address) {
   if (!clean) return false;
   if (clean.length < 26 || clean.length > 35) return false;
   const validMainNet = /^[LM3][a-km-zA-HJ-NP-Z1-9]{26,34}$/.test(clean);
-  const validTestNet = /^(Q|m|n|2)[a-km-zA-HJ-NP-Z1-9]{26,34}$/.test(clean);
-  return validMainNet || validTestNet;
+  return validMainNet;
 }
 
 function sanitizeCurrency(currency) {

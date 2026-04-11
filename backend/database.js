@@ -128,32 +128,12 @@ db.exec(`
     attempted_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
-  CREATE TABLE IF NOT EXISTS sessions (
-    sid TEXT PRIMARY KEY,
-    sess TEXT NOT NULL,
-    expired DATETIME NOT NULL,
-    user_id INTEGER,
-    ip TEXT,
-    user_agent TEXT,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-  );
-
   CREATE TABLE IF NOT EXISTS product_verifications (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     license_id TEXT NOT NULL,
     ip TEXT,
     success INTEGER DEFAULT 0,
     verified_at DATETIME DEFAULT CURRENT_TIMESTAMP
-  );
-
-  CREATE TABLE IF NOT EXISTS api_keys (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    key TEXT UNIQUE NOT NULL,
-    user_id INTEGER REFERENCES users(id),
-    label TEXT,
-    active INTEGER DEFAULT 1,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    last_used_at DATETIME
   );
 
   CREATE TABLE IF NOT EXISTS hwid_verify_rate_limit (
@@ -193,13 +173,9 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_tx_create_rate_limit_user_time ON tx_create_rate_limit(user_id, attempted_at);
   CREATE INDEX IF NOT EXISTS idx_login_rate_limit_session_time ON login_rate_limit(session_id, attempted_at);
   CREATE INDEX IF NOT EXISTS idx_login_failures_user_time ON login_failures(user_id, attempted_at);
-  CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id);
-  CREATE INDEX IF NOT EXISTS idx_sessions_expired ON sessions(expired);
   CREATE INDEX IF NOT EXISTS idx_product_verifications_license_id ON product_verifications(license_id);
   CREATE INDEX IF NOT EXISTS idx_hwid_verify_rate_limit_user_time ON hwid_verify_rate_limit(user_id, attempted_at);
   CREATE INDEX IF NOT EXISTS idx_relink_rate_limit_user_time ON relink_rate_limit(user_id, attempted_at);
-  CREATE INDEX IF NOT EXISTS idx_auth_tokens_user_id ON auth_tokens(user_id);
-  CREATE INDEX IF NOT EXISTS idx_api_keys_user_id ON api_keys(user_id);
   CREATE INDEX IF NOT EXISTS idx_withdraw_rate_limit_user_time ON withdraw_rate_limit(user_id, attempted_at);
   CREATE INDEX IF NOT EXISTS idx_transactions_tx_hash ON transactions(tx_hash);
   CREATE INDEX IF NOT EXISTS idx_admin_audit_created ON admin_audit(created_at);
