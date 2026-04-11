@@ -67,10 +67,15 @@ the server receives both the stubs calculated hash as well as the components tha
            │database │  │  wallet │  │ wallet  │
            └─────────┘  └─────────┘  └─────────┘
 ```
-
-1. client opens a websocket request to `obsidian.st/socket.io/...`
+**socket.io websockets:**
+1. client opens a websocket to `obsidian.st/socket.io/...`
 2. proxy routes request through socks5 (tor) to the hidden service
-3. hidden service processes request and returns response
+3. hidden service accepts connection and keeps circuit alive
+
+**GET/POST requests:**
+1. client sents http request to `/keykeeper/...` endpoint
+2. proxy routes request to specified endpoint through tor
+3. hidden service responds with requested data
 
 ## obsidian verification process:
 ```
