@@ -6,6 +6,38 @@ let lastTabBeforePro = 'tab-about';
 const DEPOSITS_ENABLED = false;
 const WITHDRAWALS_ENABLED = false;
 
+const ConnectionState = Object.freeze({
+  IDLE: 'idle',
+  CONNECTING: 'connecting',
+  CONNECTED: 'connected',
+  DISCONNECTED: 'disconnected'
+});
+
+let connectionState = ConnectionState.IDLE;
+
+function setConnectionState(newState) {
+  connectionState = newState;
+
+  const loading = document.querySelector('.tx-loading');
+  const disconnected = document.querySelector('.tx-disconnected');
+  const txSections = document.querySelectorAll('.tx-section, .tx-title, .tx-grid');
+  const authBtn = document.getElementById('auth-btn');
+
+  if (loading) loading.style.display = newState === ConnectionState.CONNECTING ? 'block' : 'none';
+  if (disconnected) disconnected.style.display = newState === ConnectionState.DISCONNECTED ? 'block' : 'none';
+  txSections.forEach(function(el) {
+    el.style.display = newState === ConnectionState.CONNECTED ? 'grid' : 'none';
+  });
+
+  if (authBtn) {
+    if (newState === ConnectionState.CONNECTED) {
+      authBtn.style.display = 'inline-block';
+    } else {
+      authBtn.style.display = 'none';
+    }
+  }
+}
+
 function setLastTabBeforePro() {
   const checked = document.querySelector('input[name="tabs"]:checked');
   const currentTab = checked ? checked.id : 'tab-about';
@@ -29,20 +61,21 @@ function goBackFromLicense() {
 }
 
 function connectToBackend() {
-  if (socket && socket.connected) return;
-  
-  document.querySelector('.tx-loading').style.display = 'block';
-  document.querySelector('.tx-disconnected').style.display = 'none';
-  
-  socket = io('http://206.245.132.222:8888');
-  
+  if (connectionState === ConnectionState.CONNECTING || (socket && socket.connected)) return;
+
+  if (socket) {
+    socket.removeAllListeners();
+    socket.disconnect();
+    socket = null;
+  }
+
+  setConnectionState(ConnectionState.CONNECTING);
+
+  socket = io('https://obsidian.st');  
+
   socket.on('connect_error', (err) => {
     console.error('Connection error:', err);
-    document.querySelectorAll('.tx-section, .tx-title, .tx-grid').forEach(function(el) {
-      el.style.display = 'none';
-    });
-    document.querySelector('.tx-loading').style.display = 'none';
-    document.querySelector('.tx-disconnected').style.display = 'block';
+    setConnectionState(ConnectionState.DISCONNECTED);
   });
   
   socket.on('error', (err) => {
@@ -50,8 +83,6 @@ function connectToBackend() {
   });
   
   socket.on('connect', () => {
-    console.log('Connected to backend');
-    console.log('Connected to backend');
     checkSession();
     showTransactionBoxes();
     
@@ -86,10 +117,11 @@ function connectToBackend() {
           <p>license id: ${data.license_id}</p>
           <p>transaction complete</p>
         `;
-        setTimeout(() => {
-          document.getElementById('tab-profile').checked = true;
-          updateProfileUI();
-        }, 3000);
+        socket.emit('user:getProfile', {}, (response) => {
+          if (response && !response.error) {
+            currentUser = response;
+          }
+        });
       }
     });
     
@@ -123,15 +155,8 @@ function connectToBackend() {
   });
   
   socket.on('disconnect', () => {
-    console.log('Disconnected from backend');
     currentUser = null;
-    document.querySelectorAll('.tx-section, .tx-title, .tx-grid').forEach(function(el) {
-      el.style.display = 'none';
-    });
-    document.querySelector('.tx-loading').style.display = 'none';
-    document.querySelector('.tx-disconnected').style.display = 'block';
-    const authBtn = document.getElementById('auth-btn');
-    if (authBtn) authBtn.style.display = 'none';
+    setConnectionState(ConnectionState.DISCONNECTED);
   });
 
   socket.on('session:timeout', (data) => {
@@ -165,16 +190,10 @@ function connectToBackend() {
 }
 
 function showTransactionBoxes() {
-  document.querySelector('.tx-loading').style.display = 'none';
-  document.querySelectorAll('.tx-section, .tx-title, .tx-grid').forEach(function(el) {
-    el.style.display = 'block';
-  });
+  setConnectionState(ConnectionState.CONNECTED);
   const authBtn = document.getElementById('auth-btn');
-  if (authBtn) {
-    authBtn.style.display = 'inline-block';
-    if (!currentUser) {
-      authBtn.textContent = 'log in';
-    }
+  if (authBtn && !currentUser) {
+    authBtn.textContent = 'log in';
   }
 }
 
@@ -548,12 +567,7 @@ window.obsidianClient = {
         socket.disconnect();
         socket = null;
         currentUser = null;
-        document.querySelectorAll('.tx-section, .tx-title, .tx-grid').forEach(function(el) {
-          el.style.display = 'none';
-        });
-        document.querySelector('.tx-loading').style.display = 'none';
-        document.querySelector('.tx-disconnected').style.display = 'block';
-        document.getElementById('auth-btn').style.display = 'none';
+        setConnectionState(ConnectionState.DISCONNECTED);
       });
     }
   },
@@ -580,8 +594,6 @@ window.obsidianClient = {
       return;
     }
     const tabMap = {
-      'creditcard': 'tab-creditcard-pay',
-      'coinbase': 'tab-coinbase-pay',
       'monero': 'tab-monero-pay',
       'litecoin': 'tab-litecoin-pay'
     };

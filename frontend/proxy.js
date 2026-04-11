@@ -26,7 +26,7 @@ if (!ONION_ADDRESS.endsWith('.onion')) {
 }
 
 const RATE_LIMIT_WINDOW = 60 * 60 * 1000;
-const RATE_LIMIT_MAX = 60;
+const RATE_LIMIT_MAX = 1000;
 const MAX_CONCURRENT = 5;
 const MAX_BODY_BYTES = 1024 * 1024;
 
@@ -44,7 +44,7 @@ setInterval(() => {
 }, 60000);
 
 function getClientIp(req) {
-  return req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket.remoteAddress;
+  return req.headers['x-forwarded-for']?.split(',')[0]?.trim();
 }
 
 function checkRateLimit(ip) {
@@ -180,7 +180,7 @@ server.on('upgrade', (req, socket, head) => {
   }
 });
 
-server.listen(PORT, '0.0.0.0', () => {
-  console.log('[proxy] proxy running on 0.0.0.0:' + PORT);
+server.listen(PORT, '127.0.0.1', () => {
+  console.log('[proxy] proxy running on 127.0.0.1:' + PORT);
   console.log('[proxy] forwarding to keykeeper on port:' + ONION_PORT + ' via SOCKS ' + SOCKS_PROXY);
 });
