@@ -48,6 +48,8 @@ the server receives both the stubs calculated hash as well as the components tha
   - per-user SPECK encryption keys
   - takes 2-5 seconds on average round trip + computation
 
+---
+
 ## obsidian verification process:
 ```
 ┌─────────────┐     ┌─────────────┐     ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
