@@ -8,6 +8,7 @@ this model requires that the stub (the small section of code that executes the o
 
 the server receives both the stubs calculated hash as well as the components that make up the hash. it then calculates the hash independently and compares across three domains: database hardware id, server-calculated hardware id, and the stubs returned hardware id. any mismatch and the server will refuse to issue the key.
 
+---
 ## features
 
 - **license types (configurable):**
@@ -20,7 +21,6 @@ the server receives both the stubs calculated hash as well as the components tha
 
 - **security and privacy:**
   - pgp-signed payment address
-  - tor-over-clearnet backend
   - encrypted user/license database (AES-256)
   - rate limiting and connection filtering
   - extensive input validation and regex
@@ -30,6 +30,7 @@ the server receives both the stubs calculated hash as well as the components tha
 
 - **tor-over-clearnet:**
   - http -> socks5 proxy routes clearnet traffic through tor
+  - websockets allow for real-time, low-latency interactions
   - increases privacy and security of the backend
   - doesn't require tor browser
 
@@ -51,27 +52,20 @@ the server receives both the stubs calculated hash as well as the components tha
 ---
 ## keykeeper architecture
 
-```
-                  ┌─────────────┐
-                  │   client    │
-                  │ (browser)   │           
-                  └──────▲──────┘             
-                         │
-                  ┌──────▼──────┐     ┌─────────────┐
-                  │   nginx     │◄────│  proxy      │◄─────┐
-                  │(port 443/80)│────►│ (port 8888) │────┐ │      
-                  └─────────────┘     └─────────────┘    │ │ tor 
-  ┌─────────┐     ┌─────────────┐     ┌─────────────┐    │ │ circuit
-  │ admin   │────►│  backend    │◄────│  tor        │◄───┘ │
-  │ipc shell│     │ (node.js)   │────►│ rendezvous  │──────┘
-  └─────────┘     └──────▲──────┘     └─────────────┘
-                         │
-            ┌────────────┼────────────┐
-            │            │            │
-       ┌────▼────┐  ┌────▼────┐  ┌────▼────┐
-       │ sqlite  │  │ monero  │  │litecoin │
-       │database │  │  wallet │  │ wallet  │
-       └─────────┘  └─────────┘  └─────────┘
+```  
+  ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
+  │  client     │◄────│   nginx     │◄────│  proxy      │◄─────┐
+  │  (browser)  │────►│(port 443/80)│────►│ (port 8888) │────┐ │      
+  └─────────────┘     └─────────────┘     └─────────────┘    │ │ tor 
+  ┌─────────────┐     ┌─────────────┐     ┌─────────────┐    │ │ circuit
+  │  admin      │────►│  backend    │◄────│  tor        │◄───┘ │
+  │ ipc shell   │     │ (node.js)   │────►│ rendezvous  │──────┘
+  └─────────────┘     └──────▲──────┘     └─────────────┘
+                ┌────────────┼────────────┐          
+           ┌────▼────┐  ┌────▼────┐  ┌────▼────┐
+           │ sqlite  │  │ monero  │  │litecoin │
+           │database │  │  wallet │  │ wallet  │
+           └─────────┘  └─────────┘  └─────────┘
 ```
 
 1. client opens a websocket request to `obsidian.st/socket.io/...`
@@ -96,7 +90,6 @@ recieves: speck decryption key
 6. stub receives speck key and decrypts payload
 
 ---
-
 ### SPECK-128
 
 SPECK is a lightweight block cipher designed by the NSA. it is up to 5x faster than AES as it uses a simple ARX (add-rotate-xor) set of operations rather than the expensive AES-NI operations that require special hardware to properly execute. obsidian pro uses this algorithm to encrypt/decrypt the payload, and as part of its CBC-MAC integrity and license verification checks. see more about CBC-MAC below.
@@ -145,7 +138,7 @@ function speckKeySchedule(key) {
   return roundKeys;
 }
 ```
-
+---
 ### CBC-MAC
 
 obsidian keykeeper uses a custom SPECK-based 128bit CBC-MAC (Cipher Block Chaining Message Authentication Code) to ensure license verification integrity:
