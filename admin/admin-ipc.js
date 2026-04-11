@@ -189,7 +189,6 @@ const handlers = {
   },
 
   'license:change-integrity': async (data) => {
-    const validate = require('./validate');
     const sanitized = validate.sanitizeIntegrityKey(data.new_integrity);
     if (!sanitized) return { error: 'Invalid integrity key format. Must be 32 hexadecimal characters.' };
     const license = db.prepare('SELECT * FROM licenses WHERE license_id = ?').get(data.license_id);
@@ -200,7 +199,6 @@ const handlers = {
   },
 
   'license:change-speck-key': async (data) => {
-    const validate = require('./validate');
     const sanitizedKey = validate.sanitizeIntegrityKey(data.new_speck_key);
     if (!sanitizedKey) return { error: 'Invalid speck key format. Must be 32 hex characters.' };
     const sanitizedLicenseId = validate.sanitizeLicenseId(data.license_id);
