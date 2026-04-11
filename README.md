@@ -49,24 +49,6 @@ the server receives both the stubs calculated hash as well as the components tha
   - takes 2-5 seconds on average round trip + computation
 
 ---
-
-## obsidian verification process:
-```
-┌─────────────┐     ┌─────────────┐     ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
-│   client    │────►│ verify      │────►│  proxy      │────►│ tor network │────►│  keykeeper  │
-│ (obsidian)  │◄────│ subdomain   │◄────│ (port 8888) │◄────│ (3 relays)  │◄────│ (rendezvous)│
-└─────────────┘     └─────────────┘     └─────────────┘     └─────────────┘     └─────────────┘
-sends: license id, hwid, speck-cbc-mac, hw data 
-recieves: speck decryption key 
-```
-**hardware ids are computed from client machine information:**
-1. stub collects machine info (hardware serials, cpuid, tpm-ek)
-2. compute SPECK-128-CBC-MAC using the user's integrity key
-3. constructs a json payload with the machine info and MAC
-4. transmits json payload over tor to keykeeper via clearnet subdomain
-5. hwid is verified by re-computing the MAC serverside
-6. stub receives speck key and decrypts payload
-
 ## keykeeper architecture
 
 ```
@@ -95,6 +77,23 @@ recieves: speck decryption key
 1. client opens a websocket request to `obsidian.st/socket.io/...`
 2. proxy routes request through socks5 (tor) to the hidden service
 3. hidden service processes request and returns response
+
+## obsidian verification process:
+```
+┌─────────────┐     ┌─────────────┐     ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
+│   client    │────►│ verify      │────►│  proxy      │────►│ tor network │────►│  keykeeper  │
+│ (obsidian)  │◄────│ subdomain   │◄────│ (port 8888) │◄────│ (3 relays)  │◄────│ (rendezvous)│
+└─────────────┘     └─────────────┘     └─────────────┘     └─────────────┘     └─────────────┘
+sends: license id, hwid, speck-cbc-mac, hw data 
+recieves: speck decryption key 
+```
+**hardware ids are computed from client machine information:**
+1. stub collects machine info (hardware serials, cpuid, tpm-ek)
+2. compute SPECK-128-CBC-MAC using the user's integrity key
+3. constructs a json payload with the machine info and MAC
+4. transmits json payload over tor to keykeeper via clearnet subdomain
+5. hwid is verified by re-computing the MAC serverside
+6. stub receives speck key and decrypts payload
 
 ---
 
