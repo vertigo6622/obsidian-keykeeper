@@ -51,8 +51,8 @@ the server receives both the stubs calculated hash as well as the components tha
 ## obsidian verification process:
 ```
 ┌─────────────┐     ┌─────────────┐     ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
-│   client    │◄───►│ verify      │◄───►│  proxy      │◄───►│ tor network │◄───►│  keykeeper  │
-│ (obsidian)  │     │ subdomain   │     │ (port 8888) │     │ (3 relays)  │     │ (rendezvous)│
+│   client    │────►│ verify      │────►│  proxy      │────►│ tor network │────►│  keykeeper  │
+│ (obsidian)  │◄────│ subdomain   │◄────│ (port 8888) │◄────│ (3 relays)  │◄────│ (rendezvous)│
 └─────────────┘     └─────────────┘     └─────────────┘     └─────────────┘     └─────────────┘
 sends: hwid, speck-cbc-mac, hw data 
 recieves: decryption key 
