@@ -2,7 +2,6 @@ const Database = require('better-sqlite3');
 const path = require('path');
 
 const dbPath = '/srv/db/status.db';
-
 const db = new Database(dbPath);
 
 db.pragma('journal_mode = WAL');
@@ -63,7 +62,7 @@ function getLatestStatus() {
 
 function cleanupOldLogs() {
   const result = db.prepare(`
-    DELETE FROM status_logs WHERE timestamp < datetime('now', '-30 days')
+    DELETE FROM status_logs WHERE timestamp < datetime('now', '-7 days')
   `).run();
   return result.changes;
 }

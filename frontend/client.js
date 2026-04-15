@@ -330,6 +330,21 @@ function updateDownloadUI() {
   }
 }
 
+function requestDownload(e) {
+  e.preventDefault();
+  if (!socket || !socket.connected) {
+    alert('not connected to server');
+    return;
+  }
+  socket.emit('product:token', {}, (data) => {
+    if (data.error) {
+      alert(data.error);
+      return;
+    }
+    window.location = 'https://obsidian.st/keykeeper/product/create?token=' + data.token;
+  });
+}
+
 function doLogin(account_number, password, callback) {
   if (!socket || !socket.connected) {
     connectToBackend();
@@ -594,6 +609,8 @@ window.obsidianClient = {
       return;
     }
     const tabMap = {
+      'creditcard': 'tab-creditcard-pay',
+      'coinbase': 'tab-coinbase-pay',
       'monero': 'tab-monero-pay',
       'litecoin': 'tab-litecoin-pay'
     };
