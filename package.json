@@ -7,13 +7,17 @@
     "start": "node js/server.js"
   },
   "dependencies": {
-    "express": "^4.21.0",
-    "socket.io": "^4.8.0",
-    "better-sqlite3": "^11.6.0",
-    "bcrypt": "^5.1.1",
-    "openpgp": "^6.1.1",
-    "express-session": "^1.18.0",
-    "node-fetch": "^3.3.2",
-    "socks": "^2.8.3"
+    "bcrypt": "^6.0.0",
+    "better-sqlite3": "^12.8.0",
+    "better-sqlite3-multiple-ciphers": "^11.10.0",
+    "express": "^5.2.1",
+    "express-session": "^1.19.0",
+    "helmet": "^8.1.0",
+    "http-proxy": "^1.18.1",
+    "node-fetch": "^2.7.0",
+    "openpgp": "^6.3.0",
+    "socket.io": "^4.8.3",
+    "socks": "^2.8.7",
+    "socks-proxy-agent": "^10.0.0"
   }
 }
