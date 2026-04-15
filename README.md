@@ -85,8 +85,6 @@ the server receives both the stubs calculated hash as well as the components tha
 │   client    │────►│ verify      │────►│  proxy      │────►│ tor network │────►│  keykeeper  │
 │ (obsidian)  │◄────│ subdomain   │◄────│ (port 8888) │◄────│ (3 relays)  │◄────│ (rendezvous)│
 └─────────────┘     └─────────────┘     └─────────────┘     └─────────────┘     └─────────────┘
-sends: license id, hwid, speck-cbc-mac, hw data 
-recieves: speck decryption key 
 ```
 **hardware ids are computed from client machine information:**
 1. stub collects machine info (hardware serials, cpuid, tpm-ek)
