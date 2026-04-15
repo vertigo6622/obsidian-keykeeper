@@ -104,7 +104,7 @@ SPECK is a lightweight block cipher designed by the NSA. it is up to 5x faster t
 - key size: 128 bits
 - rounds: 34
 
-### speck encrypt rounds
+### SPECK encrypt rounds
 
 the encrypt function has 34 rounds where it operates on two 64-bit words (x, y) using:
 1. **right rotation** (ror64): `(x >> r) | (x << (64 - r))`
