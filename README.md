@@ -1,4 +1,6 @@
-# obsidian keykeeper
+<img align="center" width="1000" height="100%" src="img/keykeeper-stars.png" alt="keykeeper-logo">
+
+# obsidian keykeeper - anonymous payment/license handler
 
 a cryptocurrency software licensing platform built with privacy-first principles. users can purchase software licenses using monero (xmr) or litecoin (ltc), with licenses bound to hardware ids for copy-protection. it is the backend of the obsidian pro and commerical licensing, but can be adapted for any application that requires securely handling licensing and drm.
 
