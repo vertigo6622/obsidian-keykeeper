@@ -2,7 +2,7 @@
 
 # obsidian keykeeper - anonymous digital rights management
 
-a cryptocurrency software licensing platform built with privacy-first principles. users can purchase software licenses using monero (xmr) or litecoin (ltc), with licenses bound to hardware ids for copy-protection. it is the backend of the obsidian pro and commerical licensing, but can be adapted for any application that requires securely handling licensing and drm.
+a cryptocurrency-based software licensing and digital rights management platform built with privacy-first principles. users can purchase software licenses using monero (xmr) or litecoin (ltc), with licenses bound to hardware ids for copy-protection. it is the backend of the obsidian pro and commerical licensing, but can be adapted for any application that requires securely handling licensing and drm.
 
 security features include: tor-over-clearnet backend, and a site pgp key with pgp signed ltc and xmr addresses to protect from phishing. users are identified with an account number. keykeeper does not support email sign-up at this time. this way, licensing protections can be upheld without collecting excessive user data. there are also automatic suspensions for any detected tampering with the licensing code using cryptographically secure SPECK-CBC-MAC hashes which prevent spoofing. 
 
@@ -75,11 +75,11 @@ the server receives both the stubs calculated hash as well as the components tha
 3. hidden service accepts connection and keeps circuit alive
 
 **GET/POST requests:**
-1. client sents http request to `/keykeeper/...` endpoint
+1. client sents http request to `obsidian.st/keykeeper/...` endpoint
 2. proxy routes request to specified endpoint through tor
 3. hidden service responds with requested data
 
-## obsidian verification process:
+## obsidian pro verification process:
 ```
 ┌─────────────┐     ┌─────────────┐     ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
 │   client    │────►│ verify      │────►│  proxy      │────►│ tor network │────►│  keykeeper  │
