@@ -37,15 +37,15 @@ function formatAmount(amount, currency) {
 async function createTransaction(userId, currency, licenseType, hwid, stubMac = null) {
   try {
     let address;
-    let index;
+    let subindex;
     if (currency === 'XMR') {
       const result = await wallet.generateXMRAddress();
       address = result.address;
-      index = result.subaddr_index;
+      subindex = result.subaddr_index;
     } else if (currency === 'LTC') {
       const result = await wallet.generateLTCAddress();
       address = result.address;
-      index = null;
+      subindex = null;
     } else {
       throw new Error('Unsupported currency');
     }
@@ -72,10 +72,10 @@ async function createTransaction(userId, currency, licenseType, hwid, stubMac = 
     const signedAddress = await pgp.signAddress(address, parseFloat(amountDisplay), currency, usdPriceCents / 100);
     
     const stmt = db.prepare(`
-      INSERT INTO transactions (user_id, type, currency, amount, address, index, signed_address, status, license_type, hwid, stub_mac, expires_at, usd_amount)
+      INSERT INTO transactions (user_id, type, currency, amount, address, subindex, signed_address, status, license_type, hwid, stub_mac, expires_at, usd_amount)
       VALUES (?, 'purchase', ?, ?, ?, ?, ?, 'pending', ?, ?, ?, datetime('now', '+24 hours'), ?)
     `);
-    const txResult = stmt.run(userId, currency, amountDisplay, address, index, signedAddress, licenseType, hwid, stubMac, usdPriceCents / 100);
+    const txResult = stmt.run(userId, currency, amountDisplay, address, subindex, signedAddress, licenseType, hwid, stubMac, usdPriceCents / 100);
     
     return {
       id: txResult.lastInsertRowid,
@@ -104,7 +104,7 @@ async function activateLicense(transactionId) {
     const txStmt = db.prepare('SELECT * FROM transactions WHERE id = ?');
     const transaction = txStmt.get(transactionId);
 
-    console.log('[transactions][auth] creating license for user', transaction.user_id);
+    console.log('[auth] creating license for user', transaction.user_id);
     const licenseId = auth.createLicense(transaction.user_id, transaction.license_type, transaction.hwid, transaction.stub_mac);
     
     const updateStmt = db.prepare('UPDATE transactions SET status = ?, license_id = ? WHERE id = ?');
@@ -126,7 +126,7 @@ async function activateLicense(transactionId) {
   }
 }
 
-/* FIX FOR NEW SUBADDRESS FORMAT + BEFORE ACTIVATING DEPOSIT */
+// FIX FOR NEW SUBADDRESS FORMAT BEFORE ACTIVATING DEPOSITS
 async function createDepositTransaction(userId, currency, amount) {
   try {
     const pendingCount = db.prepare(`
@@ -343,7 +343,7 @@ async function checkPendingPayments() {
     `).all();
     
     for (const tx of expiredTxs) {
-      console.log('[transactions] expiring transaction:', tx.id);
+      console.log('Expiring transaction:', tx.id);
       db.prepare('UPDATE transactions SET status = ? WHERE id = ?').run('expired', tx.id);
       
       if (io) {
@@ -360,7 +360,7 @@ async function checkPendingPayments() {
     
     if (pendingTxs.length === 0) return;
     
-    console.log('[transactions]', pendingTxs.length, 'pending transactions...');
+    console.log('[wallet] checking', pendingTxs.length, 'pending transactions...');
     
     for (const tx of pendingTxs) {
       try {
@@ -369,18 +369,18 @@ async function checkPendingPayments() {
         let actualConfirmations = 0;
         
         if (tx.currency === 'XMR') {
-          const balance = await wallet.getXMRBalanceByAddress(tx.index);
-          console.log('[transactions] pending xmr transaction:', tx.id, 'balance:', balance, 'needed:', tx.amount, 'subaddr_index', tx.index);
+          const balance = await wallet.getXMRBalanceByAddress(tx.subindex);
+          console.log('[xmr] pending tx:', tx.id, 'balance:', balance, 'needed:', tx.amount, 'subaddr_index', tx.subindex);
           const balancePiconero = BigInt(Math.round(balance * 1e12));
           const neededPiconero = BigInt(Math.round(parseFloat(tx.amount) * 1e12));
           const tolerance = BigInt(TOLERANCE.XMR);
           if (balancePiconero >= neededPiconero - tolerance && balancePiconero <= neededPiconero + tolerance * 2n) {
             confirmed = true;
-            actualConfirmations = await wallet.getXMRTransactionConfirmations(tx.index);
+            actualConfirmations = await wallet.getXMRTransactionConfirmations(tx.subindex);
           }
         } else if (tx.currency === 'LTC') {
           const balance = await wallet.getLTCBalanceByAddress(tx.address);
-          console.log('[transactions] pending ltc transaction:', tx.id, 'balance:', balance, 'needed:', tx.amount);
+          console.log('[ltc] pending tx:', tx.id, 'balance:', balance, 'needed:', tx.amount);
           const balanceSatoshis = BigInt(Math.round(balance * 1e8));
           const neededSatoshis = BigInt(Math.round(parseFloat(tx.amount) * 1e8));
           const tolerance = BigInt(TOLERANCE.LTC);
@@ -391,31 +391,22 @@ async function checkPendingPayments() {
         }
         
         if (confirmed) {
-          const transferResult = await moneroRPC('get_transfers', {
-            in: true,
-            account_index: 0,
-            subaddr_indices: [tx.subaddr_index]
-          });
-
-          /* BLOCKCHAIN TXID NOT YET TESTED SERVERSIDE */
-          const blockchainTxId = transferResult.in[0].txid;
-
           if (!tx.detected_at) {
-            db.prepare('UPDATE transactions SET detected_at = datetime(\'now\'), confirmations = ?, tx_hash = ? WHERE id = ?').run(actualConfirmations, blockchainTxId, tx.id);
+            db.prepare('UPDATE transactions SET detected_at = datetime(\'now\'), confirmations = ? WHERE id = ?').run(actualConfirmations, tx.id);
             
             if (io) {
               io.to('user_' + tx.user_id).emit('tx:detected', {
                 transactionId: tx.id,
-                tx_id: blockchainTxId,
+                tx_id: tx.tx_id,
                 currency: tx.currency,
                 amount: tx.amount,
                 confirmations: actualConfirmations
               });
             }
-            console.log('[transactions]Payment detected for transaction:', tx.id, 'confirmations:', actualConfirmations);
+            console.log('[wallet] payment detected for transaction:', tx.id, 'confirmations:', actualConfirmations);
           } else {
             db.prepare('UPDATE transactions SET confirmations = ? WHERE id = ?').run(actualConfirmations, tx.id);
-            console.log('[transactions] transaction', tx.id, 'confirmations:', actualConfirmations);
+            console.log('[wallet] transaction', tx.id, 'confirmations:', actualConfirmations);
           }
           
           const txCheck = db.prepare('SELECT status, confirmations FROM transactions WHERE id = ?').get(tx.id);
@@ -423,10 +414,10 @@ async function checkPendingPayments() {
           if (txCheck.status !== 'completed' && actualConfirmations >= 10 && tx.currency === 'XMR') {
             const lock = db.prepare('UPDATE transactions SET status = ? WHERE id = ? AND status = ?').run('confirmed', tx.id, 'pending');
             if (lock.changes === 0) {
-              console.log('[transactions] transaction already being processed:', tx.id);
+              console.log('Transaction already being processed:', tx.id);
               continue;
             }
-            console.log('[transactions] payment confirmed for transaction:', tx.id);
+            console.log('Payment confirmed for transaction:', tx.id);
             if (tx.type === 'deposit') {
               db.prepare('UPDATE transactions SET status = ? WHERE id = ?').run('completed', tx.id);
               if (io) {
@@ -437,15 +428,16 @@ async function checkPendingPayments() {
                 });
               }
             } else {
+              console.log('[transactions] calling activate license function for', tx.id);
               await activateLicense(tx.id);
             }
           } else if (txCheck.status !== 'completed' && actualConfirmations >= 6 && tx.currency === 'LTC') {
             const lock = db.prepare('UPDATE transactions SET status = ? WHERE id = ? AND status = ?').run('confirmed', tx.id, 'pending');
             if (lock.changes === 0) {
-              console.log('[transactions]Transaction already being processed:', tx.id);
+              console.log('Transaction already being processed:', tx.id);
               continue;
             }
-            console.log('[transactions]Payment confirmed for transaction:', tx.id);
+            console.log('Payment confirmed for transaction:', tx.id);
             if (tx.type === 'deposit') {
               db.prepare('UPDATE transactions SET status = ? WHERE id = ?').run('completed', tx.id);
               if (io) {

@@ -38,6 +38,7 @@ db.exec(`
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     password_hash TEXT NOT NULL,
     account_number TEXT UNIQUE NOT NULL,
+    hwid TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     last_login DATETIME,
     locked_at DATETIME,
@@ -69,7 +70,7 @@ db.exec(`
     currency TEXT NOT NULL,
     amount REAL NOT NULL,
     address TEXT NOT NULL,
-    index INTEGER,
+    subindex INTEGER,
     signed_address TEXT,
     tx_hash TEXT,
     status TEXT DEFAULT 'pending',
@@ -85,7 +86,7 @@ db.exec(`
     usd_amount REAL,
     CHECK (amount > 0),
     CHECK (confirmations >= 0),
-    CHECK (status IN ('pending', 'detected', 'activating', 'completed', 'expired', 'failed')),
+    CHECK (status IN ('pending', 'detected', 'activating', 'confirmed', 'completed', 'expired', 'failed')),
     CHECK (type IN ('purchase', 'deposit', 'withdraw'))
   );
 
@@ -112,14 +113,6 @@ db.exec(`
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER,
     attempted_at DATETIME DEFAULT CURRENT_TIMESTAMP
-  );
-
-  CREATE TABLE IF NOT EXISTS auth_tokens (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER REFERENCES users(id),
-    token TEXT UNIQUE NOT NULL,
-    expires_at DATETIME,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
   CREATE TABLE IF NOT EXISTS tx_create_rate_limit (

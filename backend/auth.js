@@ -102,7 +102,7 @@ function verifyHwidIntegrity(licenseId, sum, cpu, disk, mac, ram, tpm, callback)
     const diskStr = disk ? disk.slice(0, 16).padEnd(16, '\0') : '';
     const macStr = mac ? mac.slice(0, 16).padEnd(16, '\0') : '';
     const ramStr = ram ? ram.slice(0, 16).padEnd(16, '\0') : '';
-    const tpmStr = tpm ? tpm.slice(0, 16).padEnd(16, '\0') : '';
+    const tpmStr = tpm ? tpm.slice(-16).padStart(16, '\0') : '';
     
     const data = Buffer.alloc(96);
     
@@ -122,28 +122,27 @@ function verifyHwidIntegrity(licenseId, sum, cpu, disk, mac, ram, tpm, callback)
     computedMac.writeBigUInt64LE(computed0, 0);
     computedMac.writeBigUInt64LE(computed1, 8);
 
-    console.log('[auth] stub_mac from DB:', license.stub_mac);
-    console.log('[auth] integrity key from DB:', license.integrity);
-    console.log('[auth] data buffer hex:', data.toString('hex'));
-    console.log('[auth] computed MAC:', computedMac.toString('hex'));
-    console.log('[auth] expected MAC:', expectedMac.toString('hex'));
-
     const expectedMac = Buffer.alloc(16);
     expectedMac.writeBigUInt64LE(BigInt('0x' + sum.slice(0, 16)), 0);
-    expectedMac.writeBigUInt64LE(BigInt('0x' + sum.slice(16, 32)), 8);
-    
-    const databaseHwid = license.hwid;
+    expectedMac.writeBigUInt64LE(BigInt('0x' + sum.slice(16, 32)), 8);    
+    const databaseHwid = license.hwid ? Buffer.from(license.hwid, 'hex') : null;
 
     if (!databaseHwid) {
       if (!crypto.timingSafeEqual(computedMac, expectedMac)) {
         console.log('[auth] hwid check failed');
         return callback({ valid: false, error: 'Hardware ID integrity check failed' });
       }
+      console.log('[auth] computed MAC:', computedMac.toString('hex'));
+      console.log('[auth] expected MAC:', expectedMac.toString('hex'));
       console.log('[auth] first verification. storing hwid in db');
       updateLicenseHwid(licenseId, computedMac.toString('hex'));
       return callback({ valid: true, type: license.type });
     }
-    
+
+    console.log('[auth] computed MAC:', computedMac.toString('hex'));
+    console.log('[auth] expected MAC:', expectedMac.toString('hex'));
+    console.log('[auth] database MAC:', databaseHwid.toString('hex'));
+
     const valid1 = crypto.timingSafeEqual(computedMac, expectedMac);
     const valid2 = crypto.timingSafeEqual(expectedMac, databaseHwid);
     const valid3 = crypto.timingSafeEqual(computedMac, databaseHwid);
@@ -161,7 +160,6 @@ function verifyHwidIntegrity(licenseId, sum, cpu, disk, mac, ram, tpm, callback)
   }
 }
 
-/* TEST THIS */
 function computeHwidFromMachineInfo(machineInfo, license) {
   if (!license.integrity || !license.stub_mac) {
     console.error('Missing integrity or stub_mac in license');
@@ -336,13 +334,13 @@ function getUserById(id) {
   return stmt.get(id);
 }
 
-function createUser(passwordHash, hwid = null) {
+function createUser(passwordHash) {
   const accountNumber = generateAccountNumber();
   const stmt = db.prepare(`
-    INSERT INTO users (password_hash, account_number, hwid)
-    VALUES (?, ?, ?)
+    INSERT INTO users (password_hash, account_number)
+    VALUES (?, ?)
   `);
-  const result = stmt.run(passwordHash, accountNumber, hwid);
+  const result = stmt.run(passwordHash, accountNumber);
   return { id: result.lastInsertRowid, accountNumber };
 }
 
@@ -377,7 +375,7 @@ function createLicense(userId, type, hwid, stubMac) {
     VALUES (?, ?, ?, ?, ?, datetime('now', '+6 months'))
   `);
   stmt.run(licenseId, userId, type, hwid, stubMac);
-  console.log('[auth] license created', licenseId);
+  console.log('[auth] license created:', licenseId);
   return licenseId;
 }
 
@@ -541,11 +539,7 @@ module.exports = {
   addWithdrawAttempt,
   cleanupOldWithdrawRateLimits,
   getAccountStanding,
-  generateAuthToken,
-  validateAuthToken,
-  updateLicenseSpeckKey,
-  lockAccount,
-  unlockAccount
+  updateLicenseSpeckKey
 };
 
 const RELINK_RATE_LIMIT = 10;
@@ -633,22 +627,6 @@ function getAccountStanding(userId) {
     suspended: user.suspended === 1,
     age: (Date.now() - new Date(user.created_at).getTime()) / (1000 * 60 * 60)
   };
-}
-
-function generateAuthToken(userId, existingToken = null) {
-  const token = existingToken || crypto.randomBytes(32).toString('hex');
-  const stmt = db.prepare(`INSERT OR REPLACE INTO auth_tokens (user_id, token) VALUES (?, ?)`);
-  stmt.run(userId, token);
-  return token;
-}
-
-function validateAuthToken(token) {
-  if (!token) return null;
-  const stmt = db.prepare(`
-    SELECT user_id FROM auth_tokens WHERE token = ?
-  `);
-  const result = stmt.get(token);
-  return result ? result.user_id : null;
 }
 
 function getUserById(userId) {

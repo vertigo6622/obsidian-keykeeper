@@ -11,7 +11,7 @@ const BASE_BINARIES = {
 };
 
 function generateRandomFilename() {
-  return 'obisidan.pro.' + crypto.randomBytes(7).toString('hex') + '.exe';
+  return 'obsidian.pro.' + crypto.randomBytes(7).toString('hex') + '.exe';
 }
 
 function createPackedBinary(licenseType, hwid, licenseId, callback) {
@@ -25,7 +25,7 @@ function createPackedBinary(licenseType, hwid, licenseId, callback) {
     return callback(new Error('Base binary not found'));
   }
   
-  const packerPath = '/srv/internal/obs-internal.exe';
+  const packerPath = '/srv/internal/obsidian.internal.exe';
   const outputDir = '/tmp/packer-output-' + crypto.randomBytes(12).toString('hex'); 
   
   if (!fs.existsSync(outputDir)) {
@@ -35,14 +35,14 @@ function createPackedBinary(licenseType, hwid, licenseId, callback) {
   const randomName = generateRandomFilename();
   const outputPath = path.join(outputDir, randomName);
   
-  const args = ['--compress', '--ultra', '--fix'];
+  const args = ['--compress', '--fix'];
   
   if (hwid) {
     const sanitizedHwid = validate.sanitizeHwid(hwid);
     if (!sanitizedHwid) {
       return callback(new Error('Invalid HWID format'));
     }
-    args.push('--link-to-hwid', sanitizedHwid);
+    args.push('--link-hwid', sanitizedHwid);
   }
   
   if (licenseId) {
@@ -55,9 +55,9 @@ function createPackedBinary(licenseType, hwid, licenseId, callback) {
 
   args.push(basePath, outputPath);
   
-  console.log('[packer] packing binary:', args.join(' '));
+  console.log('Packing binary:', packerPath, args.join(' '));
   
-  const proc = spawn('wine', [packerPath, args]);
+  const proc = spawn('wine', [packerPath, ...args]);
   
   let stdout = '';
   let stderr = '';
@@ -76,12 +76,16 @@ function createPackedBinary(licenseType, hwid, licenseId, callback) {
     }
     
     let packerOutput;
+    const jsonStart = stderr.indexOf('{');
     try {
-      packerOutput = JSON.parse(stderr.trim());
+      if (jsonStart !== -1) {
+        packerOutput = JSON.parse(stderr.substring(jsonStart));
+      }
     } catch (e) {
-      return callback(new Error('Invalid JSON output from packer: ' + stdout));
+      console.error('packer stderr:', JSON.stringify(stderr));
+      return callback(new Error('Invalid JSON output from packer'));
     }
-    
+
     const mac = packerOutput.mac;
     const key = packerOutput.key;
     const integrity = packerOutput.integrityKey;
@@ -103,8 +107,7 @@ function createPackedBinary(licenseType, hwid, licenseId, callback) {
     } 
     
     const binaryData = fs.readFileSync(outputPath);
-    fs.unlink(outputPath, () => {});
-    fs.unlink(outputDir, () => {});
+    fs.rm(outputDir, { recursive: true }, () => {});
     
     callback(null, {
       mac: mac,
@@ -117,12 +120,7 @@ function createPackedBinary(licenseType, hwid, licenseId, callback) {
   });
   
   proc.on('error', (err) => {
-    if (fs.existsSync(outputPath)) {
-      fs.unlink(outputPath, () => {});
-      fs.unlink(outputDir, () => {});
-    } else if (fs.existsSync(outputDir)) {
-      fs.unlink(outputDir, () => {});
-    }
+    fs.rm(outputDir, { recursive: true }, () => {});
     callback(err);
   });
 }

@@ -1,4 +1,4 @@
-const fetch = global.fetch || require('node-fetch');
+const fetch = require('node-fetch');
 const { SocksProxyAgent } = require('socks-proxy-agent');
 
 const MONERO_RPC_URL = 'http://127.0.0.1:4331/json_rpc';
@@ -17,7 +17,7 @@ async function getExchangeRates() {
   }
   
   try {
-    const apiKey = process.env.COINGECKO_API_KEY; 
+    const apiKey = process.env.COINGECKO_API_KEY;
     let url = 'https://api.coingecko.com/api/v3/simple/price?vs_currencies=usd&ids=monero,litecoin&names=Monero,Litecoin&symbols=xmr,ltc';
     if (apiKey) {
       url += '?x_cg_demo_api_key=' + apiKey;
@@ -63,7 +63,7 @@ async function moneroRPC(method, params = {}) {
 }
 
 const ELECTRUM_LTC_USER = 'user';
-const ELECTRUM_LTC_PASS = 'SgNDLSBDUB37oIAHj7eRRA==';
+const ELECTRUM_LTC_PASS = process.env.ELECTRUM_LTC_PASS;
 
 async function electrumRPC(method, params = {}) {
   const response = await fetch(ELECTRUM_LTC_URL, {
@@ -80,7 +80,6 @@ async function electrumRPC(method, params = {}) {
     })
   });
   const data = await response.json();
-  console.log('electrumRPC data:', data);
   return data.result;
 }
 
@@ -104,7 +103,6 @@ async function generateLTCAddress() {
     const result = await electrumRPC('createnewaddress', {});
     return {
       address: result,
-      id: address.id
     };
   } catch (error) {
     console.error('LTC address generation error:', error);
@@ -141,12 +139,10 @@ async function getXMRBalanceByAddress(subaddrIndex) {
       subaddr_indices: [subaddrIndex]
     });
     if (!result.in) return 0;
-    
-    const totalPiconeros = result.in
-      .filter(transfer => !transfer.locked)
-      .reduce((sum, transfer) => sum + BigInt(transfer.amount), 0n);
-    
-    return Number(totalPiconeros) / 1e12;
+	
+    const transfer = result.in[0];
+ 
+    return transfer.amount / 1e12; 
   } catch (error) {
     console.error('XMR balance error:', error);
     return 0;

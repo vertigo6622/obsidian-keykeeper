@@ -56,6 +56,9 @@ const DEPOSITS_ENABLED = false;
 const WITHDRAWALS_ENABLED = false;
 const MIN_ACCOUNT_AGE_HOURS = 24;
 
+const downloadTokens = new Map();
+const TOKEN_TTL_MS = 30 * 1000;
+
 const io = new Server(server, {
   cors: {
     origin: '*',
@@ -70,7 +73,7 @@ const IDLE_TIMEOUT_MS = 60 * 60 * 1000;
 tx.setSocketIO(io);
 
 const PORT = process.env.PORT || 3000;
-const SESSION_SECRET = require('crypto').randomBytes(32).toString('hex');
+const SESSION_SECRET = crypto.randomBytes(32).toString('hex');
 
 app.use(express.json());
 
@@ -89,7 +92,6 @@ const sessionMiddleware = session({
 app.use(sessionMiddleware);
 
 io.use((socket, next) => {
-  console.log('[keykeeper]Socket.io session middleware - socket id:', socket.id);
   sessionMiddleware(socket.request, socket.request.res || {}, (err) => {
     if (err) {
       console.error('Session middleware error:', err);
@@ -139,7 +141,7 @@ app.get('/keykeeper/status', async (req, res) => {
 
 app.post('/keykeeper/product/verify', async (req, res) => {
   try {
-    console.log('[keykeeper][auth] product verification request:', req.body);
+    console.log('[auth] product verification request:', req.body);
     const mapped = {
       license: req.body['0'],
       cpu: req.body['1'],
@@ -157,27 +159,27 @@ app.post('/keykeeper/product/verify', async (req, res) => {
     }
     
     if (!license || !sum || !cpu || !disk || !mac || !ram || !tpm) {
-      console.log('[keykeeper] failed HWID validation: missing fields');
+      console.log('Failed HWID validation: missing fields');
       auth.logProductVerification(license || 'unknown', sessionId, false);
       return res.json({ valid: false, error: 'license, sum, cpu, disk, mac, and ram required' });
     }
         
     const licenseData = auth.getLicenseById(license);
     if (!licenseData) {
-      console.log('[keykeeper] failed HWID validation: missing license');
+      console.log('Failed HWID validation: missing license');
       auth.logProductVerification(license, sessionId, false);
       return res.json({ valid: false, error: 'License not found' });
     }
     
     const standing = auth.getAccountStanding(licenseData.user_id);
     if (!standing.exists || standing.locked || standing.suspended) {
-      console.log('[keykeeper] failed HWID validation: account not in good standing | id:', licenseData.user_id);
+      console.log('Failed HWID validation: account not in good standing | id:', licenseData.user_id);
       auth.logProductVerification(license, sessionId, false);
       return res.json({ valid: false, error: 'Account not in good standing' });
     }
     
     if (new Date(licenseData.expires_at) < new Date()) {
-      console.log('[keykeeper] failed HWID validation: License expired', licenseData.user_id);
+      console.log('Failed HWID validation: License expired', licenseData.user_id);
       auth.logProductVerification(license, sessionId, false);
       return res.json({ valid: false, error: 'License expired' });
     }
@@ -190,7 +192,7 @@ app.post('/keykeeper/product/verify', async (req, res) => {
       
       const decryptionKey = licenseData.speck_key;
       auth.logProductVerification(license, sessionId, true);
-    
+      
       res.json({
         valid: true,
         type: result.type,
@@ -204,23 +206,30 @@ app.post('/keykeeper/product/verify', async (req, res) => {
   }
 });
 
-app.post('/keykeeper/product/create', (req, res) => {
-  const userId = req.session.userId;
-  if (!userId) {
+app.get('/keykeeper/product/create', (req, res) => {
+  const token = req.query.token;
+  if (!token) {
+    return res.status(400).send('Unauthorized');
+  }
+
+  const tokenData = downloadTokens.get(token);
+  if (!tokenData) {
     return res.status(401).send('Unauthorized');
   }
+  downloadTokens.delete(token);
   
-  const { license_id } = req.body;
+  if (Date.now() - tokenData.createdAt > TOKEN_TTL_MS) {
+    return res.status(401).send('Token expired');
+  }
+
+  const userId = tokenData.userId; 
+  const license = auth.getLicenseByUserId(userId);
   
-  if (!license_id) {
-    return res.status(400).send('license_id required');
+  if (!license) {
+    return res.status(400).send('Unauthorized');
   }
   
-  const license = auth.getLicenseById(license_id);
-  if (!license || license.user_id !== userId) {
-    return res.status(404).send('License not found');
-  }
-  
+  const license_id = license.license_id;
   const licenseType = license.type;
   const hwid = license.hwid || null;
   
@@ -250,8 +259,7 @@ io.on('error', (err) => {
 });
 
 io.on('connection', (socket) => {
-  console.log('[keykeeper] client connected:', socket.id);
-  
+  console.log('[keykeeper] client connected:', socket.id);  
   socket.on('error', (err) => {
     console.error('Socket error:', socket.id, err);
   });
@@ -261,7 +269,7 @@ io.on('connection', (socket) => {
   const checkIdle = () => {
     if (socket.request.session && socket.request.session.userId) {
       if (Date.now() - lastActivity > IDLE_TIMEOUT_MS) {
-        console.log('[keykeeper]Client idle timeout:', socket.id);
+        console.log('Client idle timeout:', socket.id);
         socket.emit('session:timeout', { message: 'Session expired due to inactivity' });
         socket.request.session.destroy();
         socket.disconnect(true);
@@ -300,7 +308,7 @@ io.on('connection', (socket) => {
       }
       
       const passwordHash = await auth.hashPassword(sanitizedPassword);
-      const user = auth.createUser(passwordHash, hwid);
+      const user = auth.createUser(passwordHash);
       
       auth.addRateLimitEntry(sessionId);
       
@@ -323,20 +331,20 @@ io.on('connection', (socket) => {
       const sanitizedPassword = validate.sanitizePassword(password);
       const sessionId = socket.request.session.id || 'unknown';
       
-      console.log('[keykeeper] login attempt - account_number:', sanitizedAccountNumber);
+      console.log('[keykeeper] Login attempt - account_number:', sanitizedAccountNumber);
       
       if (!sanitizedAccountNumber) {
-        console.log('[keykeeper]Login failed: invalid account number');
+        console.log('Login failed: invalid account number');
         return callback({ success: false, error: 'Invalid account number format' });
       }
       
       if (!sanitizedPassword) {
-        console.log('[keykeeper]Login failed: password issue, length:', password ? password.length : 'undefined');
+        console.log('Login failed: password issue, length:', password ? password.length : 'undefined');
         return callback({ success: false, error: 'Password must be 8-128 characters' });
       }
       
       if (auth.isLoginRateLimited(sessionId)) {
-        console.log('[keykeeper]Login failed: rate limited');
+        console.log('Login failed: rate limited');
         return callback({ success: false, error: 'Too many login attempts. Try again later.' });
       }
       
@@ -348,18 +356,18 @@ io.on('connection', (socket) => {
       }
       
       if (auth.isAccountLocked(user.id)) {
-        return callback({ success: false, error: 'account locked. contact support.' });
+        return callback({ success: false, error: 'Account locked. Contact support.' });
       }
       
       if (auth.isAccountSuspended(user.id)) {
-        return callback({ success: false, error: 'account suspended. contact support.' });
+        return callback({ success: false, error: 'Account suspended. contact support.' });
       }
       
       const valid = await auth.verifyPassword(sanitizedPassword, user.password_hash);
       if (!valid) {
         auth.addFailedLoginAttempt(user.id, sessionId);
         const attemptsLeft = 5 - auth.getFailedLoginAttempts(user.id);
-        return callback({ success: false, error: 'Invalid credentials.' });
+        return callback({ success: false, error: 'Invalid credentials. ' + attemptsLeft + ' attempts remaining.' });
       }
       
       auth.clearFailedLoginAttempts(user.id);
@@ -451,7 +459,6 @@ io.on('connection', (socket) => {
     if (!DEPOSITS_ENABLED) {
       return callback({ success: false, error: 'Deposits are currently disabled' });
     }
-    
     const userId = socket.request.session.userId;
     if (!userId) {
       return callback({ error: 'Not authenticated' });
@@ -496,7 +503,6 @@ io.on('connection', (socket) => {
     if (!WITHDRAWALS_ENABLED) {
       return callback({ success: false, error: 'Withdrawals are currently disabled' });
     }
-    
     const userId = socket.request.session.userId;
     if (!userId) {
       return callback({ error: 'Not authenticated' });
@@ -686,6 +692,23 @@ io.on('connection', (socket) => {
     
 callback({ canRelink: auth.canRelink(sanitizedLicenseId) });
   });
+
+  socket.on('product:token', (data, callback) => {
+    const userId = socket.request.session.userId;
+    if (!userId) {
+      return callback({ error: 'Not authenticated' });
+    }
+    
+    const license = auth.getLicenseByUserId(userId);
+    if (!license) {
+      return callback({ error: 'No license found' });
+    }
+    
+    const token = crypto.randomBytes(32).toString('hex');
+    downloadTokens.set(token, { userId, createdAt: Date.now() });
+    
+    callback({ token });
+  });
   
   socket.on('user:changePassword', async (data, callback) => {
     const userId = socket.request.session.userId;
@@ -733,7 +756,6 @@ if (!fs.existsSync(dataDir)) {
 
 server.listen(PORT, '127.0.0.1', () => {
   console.log('[keykeeper] obsidian backend running on port ' + PORT);
-  console.log('[keykeeper] pgp key path: ' + (process.env.PGP_KEY_PATH || '/srv/pgp/key.asc'));
   adminIpc.startIPCServer();
   pgp.loadPrivateKey();
   
