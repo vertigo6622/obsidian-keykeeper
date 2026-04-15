@@ -1,4 +1,4 @@
-<img align="center" width="1000" height="100%" src="img/keykeeper-stars.png" alt="keykeeper-logo">
+<img align="center" width="1000" height="100%" src="img/stars-only.png" alt="keykeeper-logo">
 
 # obsidian keykeeper - anonymous digital rights management
 
