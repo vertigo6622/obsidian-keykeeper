@@ -90,6 +90,16 @@ db.exec(`
     CHECK (type IN ('purchase', 'deposit', 'withdraw'))
   );
 
+  CREATE TABLE IF NOT EXISTS sessions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    sid TEXT UNIQUE NOT NULL,
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    ip TEXT,
+    user_agent TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    expired DATETIME NOT NULL
+  );
+
   CREATE TABLE IF NOT EXISTS register_rate_limit (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     session_id TEXT NOT NULL,
