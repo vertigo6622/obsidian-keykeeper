@@ -136,24 +136,8 @@ function connectToBackend() {
         `;
       }
     });
-    
-    socket.on('license:relink:complete', (data) => {
-      console.log('Relink complete:', data);
-      const relinkingPanel = document.getElementById('panel-relinking');
-      if (relinkingPanel) {
-        relinkingPanel.innerHTML = `
-          <label class="back-btn" for="tab-manage">&lt; back</label>
-          <h1>Relink Complete!</h1>
-          <p>license has been relinked successfully</p>
-        `;
-        setTimeout(() => {
-          document.getElementById('tab-manage').checked = true;
-          updateManageLicenseUI();
-        }, 3000);
-      }
-    });
   });
-  
+ 
   socket.on('disconnect', () => {
     currentUser = null;
     setConnectionState(ConnectionState.DISCONNECTED);
@@ -245,8 +229,8 @@ function updateProfileUI() {
   const ltcEl = document.getElementById('balance-ltc');
   const usdEl = document.getElementById('balance-usd');
   
-  if (xmrEl) xmrEl.textContent = `monero balance: ${currentUser.balance.xmr.toFixed(6)} XMR`;
-  if (ltcEl) ltcEl.textContent = `litecoin balance: ${currentUser.balance.ltc.toFixed(6)} LTC`;
+  if (xmrEl) xmrEl.textContent = `monero balance: ${currentUser.balance.xmr.toFixed(8)} XMR`;
+  if (ltcEl) ltcEl.textContent = `litecoin balance: ${currentUser.balance.ltc.toFixed(8)} LTC`;
   if (usdEl) usdEl.textContent = `usd credits: $${currentUser.balance.usd} USD`;
   
   const pending = currentUser.pending_transaction;
@@ -395,17 +379,6 @@ function doRegister(password, callback) {
   });
 }
 
-function verifyLicense(licenseId) {
-  socket.emit('license:verify', { licenseId }, (response) => {
-    if (response.valid) {
-      currentUser = response;
-      showLoggedInUI();
-    } else {
-      alert(response.error || 'Invalid license');
-    }
-  });
-}
-
 function createTransaction(currency, licenseType, hwid, callback) {
   socket.emit('tx:create', { currency, licenseType, hwid }, (response) => {
     if (response.success) {
@@ -507,34 +480,6 @@ function getHwid() {
   return null;
 }
 
-function initRelink(licenseId, callback) {
-  socket.emit('license:initRelink', { licenseId }, (response) => {
-    if (response.success) {
-      callback(response);
-    } else {
-      alert(response.error || 'Failed to init relink');
-      callback(null);
-    }
-  });
-}
-
-function doRelink(licenseId, machineInfo, callback) {
-  socket.emit('license:relink', { licenseId, machineInfo }, (response) => {
-    if (response.success) {
-      alert('License relinked successfully');
-    } else {
-      alert(response.error || 'Failed to relink license');
-    }
-    callback(response);
-  });
-}
-
-function canRelink(licenseId, callback) {
-  socket.emit('license:canRelink', { licenseId }, (response) => {
-    callback(response.canRelink);
-  });
-}
-
 function doChangePassword(oldPassword, newPassword, callback) {
   socket.emit('user:changePassword', { oldPassword, newPassword }, (response) => {
     callback(response);
@@ -566,11 +511,8 @@ window.obsidianClient = {
   connect: connectToBackend,
   login: doLogin,
   register: doRegister,
-  verifyLicense,
   createTransaction,
   getHistory: getTransactionHistory,
-  relink: doRelink,
-  canRelink: canRelink,
   getHwid: getHwid,
   changePassword: doChangePassword,
   deleteAccount: doDeleteAccount,
@@ -609,13 +551,9 @@ window.obsidianClient = {
       return;
     }
     const tabMap = {
-      'creditcard': 'tab-creditcard-pay',
-      'coinbase': 'tab-coinbase-pay',
       'monero': 'tab-monero-pay',
       'litecoin': 'tab-litecoin-pay'
     };
     document.getElementById(tabMap[type]).checked = true;
   },
-  initRelink: initRelink,
-  doRelink: doRelink
 };
