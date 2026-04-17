@@ -5,7 +5,6 @@ const session = require('express-session');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
-const Database = require('better-sqlite3');
 
 const auth = require('./auth');
 const tx = require('./transactions');
@@ -15,6 +14,7 @@ const packer = require('./packer-bridge');
 const pgp = require('./pgp')
 const adminIpc = require('./admin-ipc');
 const helmet = require('helmet');
+const db = require('./database');
 
 const app = express();
 
@@ -231,8 +231,15 @@ app.get('/keykeeper/product/create', (req, res) => {
   
   const license_id = license.license_id;
   const licenseType = license.type;
-  const hwid = license.hwid || null;
-  
+
+  let hwid = license.hwid;
+  if (hwid) {
+    console.log('[keykeeper] resetting hwid for license:', license_id);
+    auth.updateLicenseHwid(license_id, null);
+    db.prepare('UPDATE licenses SET last_relink_at = datetime(\'now\') WHERE license_id = ?').run(license_id);
+    hwid = null;
+  }
+
   packer.createPackedBinary(licenseType, hwid, license_id, (err, result) => {
     if (err) {
       console.error('Packer error:', err.message);
@@ -589,108 +596,6 @@ io.on('connection', (socket) => {
     history.sort((a, b) => new Date(b.date) - new Date(a.date));
     
     callback({ history });
-  });
-  
-  socket.on('license:initRelink', (data, callback) => {
-    const userId = socket.request.session.userId;
-    if (!userId) {
-      return callback({ error: 'Not authenticated' });
-    }
-    
-    const { licenseId } = data;
-    
-    const sanitizedLicenseId = validate.sanitizeLicenseId(licenseId);
-    if (!sanitizedLicenseId) {
-      return callback({ error: 'Invalid license ID format' });
-    }
-    
-    const license = auth.getLicenseById(sanitizedLicenseId);
-    if (!license || license.user_id !== userId) {
-      return callback({ error: 'License not found' });
-    }
-    
-    if (!auth.canRelink(sanitizedLicenseId)) {
-      return callback({ error: 'Can only relink once per month' });
-    }
-    
-    const speckKey = license.speck_key;
-    
-    callback({
-      success: true,
-      speckKey: speckKey,
-      machineInfoFields: ['cpu_serial', 'disk_serial', 'mac_address', 'ram_serial', 'tpm_key']
-    });
-  });
-
-  socket.on('license:relink', (data, callback) => {
-    const { licenseId, machineInfo } = data;
-    
-    const sanitizedLicenseId = validate.sanitizeLicenseId(licenseId);
-    if (!sanitizedLicenseId) {
-      return callback({ error: 'Invalid license ID format' });
-    }
-    
-    const license = auth.getLicenseById(sanitizedLicenseId);
-    if (!license) {
-      return callback({ error: 'License not found' });
-    }
-
-    const userId = license.user_id;
-
-    if (auth.isRelinkRateLimited(userId)) {
-      return callback({ error: 'Too many relink attempts. Try again later.' });
-    }
-    
-    if (!auth.canRelink(sanitizedLicenseId)) {
-      return callback({ error: 'Can only relink once per month' });
-    }
-    
-    if (!machineInfo || typeof machineInfo !== 'object') {
-      return callback({ error: 'machineInfo required' });
-    }
-    
-    const sanitizedMachineInfo = {
-      cpu_serial: validate.sanitizeString(machineInfo.cpu_serial, 64) || '',
-      disk_serial: validate.sanitizeString(machineInfo.disk_serial, 64) || '',
-      mac_address: validate.sanitizeString(machineInfo.mac_address, 64) || '',
-      ram_serial: validate.sanitizeString(machineInfo.ram_serial, 256) || '',
-      tpm_key: validate.sanitizeString(machineInfo.tpm_key, 256) || ''
-    };
-    
-    const computedHwid = auth.computeHwidFromMachineInfo(sanitizedMachineInfo, license);
-    if (!computedHwid) {
-      return callback({ error: 'Failed to compute HWID' });
-    }
-    
-    auth.addRelinkAttempt(userId);
-    
-    const result = auth.relinkLicense(sanitizedLicenseId, computedHwid);
-    
-    if (result.success) {
-      io.emit('license:relink:complete', { licenseId: sanitizedLicenseId });
-    }
-    
-    callback(result);
-  });
-  
-  socket.on('license:canRelink', (data, callback) => {
-    const userId = socket.request.session.userId;
-    if (!userId) {
-      return callback({ error: 'Not authenticated' });
-    }
-    
-    const { licenseId } = data;
-    const sanitizedLicenseId = validate.sanitizeLicenseId(licenseId);
-    if (!sanitizedLicenseId) {
-      return callback({ error: 'Invalid license ID format' });
-    }
-    
-    const license = auth.getLicenseById(sanitizedLicenseId);
-    if (!license || license.user_id !== userId) {
-      return callback({ error: 'License not found' });
-    }
-    
-callback({ canRelink: auth.canRelink(sanitizedLicenseId) });
   });
 
   socket.on('product:token', (data, callback) => {

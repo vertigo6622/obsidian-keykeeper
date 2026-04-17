@@ -160,43 +160,6 @@ function verifyHwidIntegrity(licenseId, sum, cpu, disk, mac, ram, tpm, callback)
   }
 }
 
-function computeHwidFromMachineInfo(machineInfo, license) {
-  if (!license.integrity || !license.stub_mac) {
-    console.error('Missing integrity or stub_mac in license');
-    return null;
-  }
-  
-  const data = Buffer.alloc(96);
-  
-  const fields = [
-    machineInfo.cpu_serial,
-    machineInfo.disk_serial,
-    machineInfo.mac_address,
-    machineInfo.ram_serial,
-    machineInfo.tpm_ek
-  ];
-  
-  let offset = 16;
-  for (const field of fields) {
-    const fieldData = field || '';
-    const fieldBuffer = Buffer.from(fieldData, 'utf8');
-    fieldBuffer.copy(data, offset);
-    offset += 16;
-  }
-  
-  try {
-    const keyHex = license.stub_mac;
-    const [mac0, mac1] = speckCbcMac(data, keyHex);
-    const macBuffer = Buffer.alloc(16);
-    macBuffer.writeBigUInt64LE(mac0, 0);
-    macBuffer.writeBigUInt64LE(mac1, 8);
-    return macBuffer.toString('hex');
-  } catch (e) {
-    console.error('HWID computation error:', e.message);
-    return null;
-  }
-}
-
 function generateAccountNumber() {
   const maxAttempts = 10;
   for (let i = 0; i < maxAttempts; i++) {
@@ -379,31 +342,6 @@ function createLicense(userId, type, hwid, stubMac) {
   return licenseId;
 }
 
-function canRelink(licenseId) {
-  const stmt = db.prepare(`
-    SELECT last_relink_at FROM licenses WHERE license_id = ?
-  `);
-  const license = stmt.get(licenseId);
-  if (!license) return false;
-  if (!license.last_relink_at) return true;
-  
-  const relinkDate = new Date(license.last_relink_at);
-  const now = new Date();
-  const monthsDiff = (now - relinkDate) / (1000 * 60 * 60 * 24 * 30);
-  return monthsDiff >= 1;
-}
-
-function relinkLicense(licenseId, newHwid) {
-  if (!canRelink(licenseId)) {
-    return { success: false, error: 'Can only relink once per month' };
-  }
-  const stmt = db.prepare(`
-    UPDATE licenses SET hwid = ?, last_relink_at = datetime('now') WHERE license_id = ?
-  `);
-  stmt.run(newHwid, licenseId);
-  return { success: true };
-}
-
 function updateLicenseDownloadFilename(licenseId, filename) {
   const stmt = db.prepare(`UPDATE licenses SET download_filename = ? WHERE license_id = ?`);
   stmt.run(filename, licenseId);
@@ -509,8 +447,6 @@ module.exports = {
   getLicenseById,
   generateLicenseId,
   createLicense,
-  canRelink,
-  relinkLicense,
   logProductVerification,
   changePassword,
   deleteAccount,
@@ -518,11 +454,8 @@ module.exports = {
   cleanupOldSessions,
   verifyHwidIntegrity,
   getSpeckKey,
-  computeHwidFromMachineInfo,
   getUserByLicenseId,
   getUserByAccountNumber,
-  isRelinkRateLimited,
-  addRelinkAttempt,
   updateLicenseDownloadFilename,
   updateLicenseStubMac,
   updateLicenseHwid,
@@ -541,22 +474,6 @@ module.exports = {
   getAccountStanding,
   updateLicenseSpeckKey
 };
-
-const RELINK_RATE_LIMIT = 10;
-
-function isRelinkRateLimited(userId) {
-  const stmt = db.prepare(`
-    SELECT COUNT(*) as count FROM relink_rate_limit 
-    WHERE user_id = ? AND attempted_at > datetime('now', '-1 hour')
-  `);
-  const result = stmt.get(userId);
-  return result.count >= RELINK_RATE_LIMIT;
-}
-
-function addRelinkAttempt(userId) {
-  const stmt = db.prepare(`INSERT INTO relink_rate_limit (user_id) VALUES (?)`);
-  stmt.run(userId);
-}
 
 const TX_CREATE_RATE_LIMIT = 1;
 
@@ -627,9 +544,4 @@ function getAccountStanding(userId) {
     suspended: user.suspended === 1,
     age: (Date.now() - new Date(user.created_at).getTime()) / (1000 * 60 * 60)
   };
-}
-
-function getUserById(userId) {
-  const stmt = db.prepare(`SELECT id, account_number, hwid, created_at, last_login FROM users WHERE id = ?`);
-  return stmt.get(userId);
 }
