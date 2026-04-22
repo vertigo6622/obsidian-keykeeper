@@ -94,28 +94,38 @@ async function createTransaction(userId, currency, licenseType, hwid, stubMac = 
 
 async function activateLicense(transactionId) {
   try {
-    const lockStmt = db.prepare('UPDATE transactions SET status = ? WHERE id = ? AND status IN (?, ?)');
-    const lockResult = lockStmt.run('activating', transactionId, 'pending', 'confirmed');
+    const activate = db.transaction(() => {
+      const lockStmt = db.prepare('UPDATE transactions SET status = ? WHERE id = ? AND status IN (?, ?)');
+      const lockResult = lockStmt.run('activating', transactionId, 'pending', 'confirmed');
     
-    if (lockResult.changes === 0) {
+      if (lockResult.changes === 0) {
+        return { success: false, error: 'Transaction already processed' };
+     }
+    
+      const txStmt = db.prepare('SELECT * FROM transactions WHERE id = ?');
+      const transaction = txStmt.get(transactionId);
+
+      console.log('[auth] creating license for user', transaction.user_id);
+      const licenseId = auth.createLicense(transaction.user_id, transaction.license_type, transaction.hwid, transaction.stub_mac);
+    
+      const updateStmt = db.prepare('UPDATE transactions SET status = ?, license_id = ? WHERE id = ?');
+      updateStmt.run('completed', licenseId, transactionId);
+    
+      return { licenseId, userId: transaction.user_id, currency: transaction.currency, amount: transaction.amount };
+    });
+
+    const result = activate();
+
+    if (!result) {
       return { success: false, error: 'Transaction already processed' };
     }
-    
-    const txStmt = db.prepare('SELECT * FROM transactions WHERE id = ?');
-    const transaction = txStmt.get(transactionId);
 
-    console.log('[auth] creating license for user', transaction.user_id);
-    const licenseId = auth.createLicense(transaction.user_id, transaction.license_type, transaction.hwid, transaction.stub_mac);
-    
-    const updateStmt = db.prepare('UPDATE transactions SET status = ?, license_id = ? WHERE id = ?');
-    updateStmt.run('completed', licenseId, transactionId);
-    
     if (io) {
-      io.to('user_' + transaction.user_id).emit('tx:confirmed', {
+      io.to('user_' + result.userId).emit('tx:confirmed', {
         transactionId: transactionId,
-        license_id: licenseId,
-        currency: transaction.currency,
-        amount: transaction.amount
+        license_id: result.licenseId,
+        currency: result.currency,
+        amount: result.amount
       });
     }
     
@@ -126,7 +136,7 @@ async function activateLicense(transactionId) {
   }
 }
 
-// FIX FOR NEW SUBADDRESS FORMAT BEFORE ACTIVATING DEPOSITS
+// FIX FOR NEW SUBADDRESS FORMAT + DOUBLESPEND BEFORE ACTIVATING DEPOSITS
 async function createDepositTransaction(userId, currency, amount) {
   try {
     const pendingCount = db.prepare(`
