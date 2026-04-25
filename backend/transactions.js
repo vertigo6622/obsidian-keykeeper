@@ -4,7 +4,7 @@ const pgp = require('./pgp');
 const auth = require('./auth');
 const crypto = require('crypto');
 
-const PRICES_USD_CENTS = { pro: 600, commercial: 2000 };
+const PRICES_USD_CENTS = { pro: 6000, commercial: 20000 };
 const TOLERANCE = { XMR: BigInt(100000), LTC: BigInt(10) };
 
 const MAX_DAILY_WITHDRAW_USD = 200;
@@ -100,7 +100,7 @@ async function activateLicense(transactionId) {
     
       if (lockResult.changes === 0) {
         return { success: false, error: 'Transaction already processed' };
-     }
+      }
     
       const txStmt = db.prepare('SELECT * FROM transactions WHERE id = ?');
       const transaction = txStmt.get(transactionId);
@@ -111,13 +111,13 @@ async function activateLicense(transactionId) {
       const updateStmt = db.prepare('UPDATE transactions SET status = ?, license_id = ? WHERE id = ?');
       updateStmt.run('completed', licenseId, transactionId);
     
-      return { licenseId, userId: transaction.user_id, currency: transaction.currency, amount: transaction.amount };
+      return { success: true, licenseId, userId: transaction.user_id, currency: transaction.currency, amount: transaction.amount };
     });
 
     const result = activate();
 
-    if (!result) {
-      return { success: false, error: 'Transaction already processed' };
+    if (!result || !result.success) {
+      return { success: false, error: 'Error processing transaction' };
     }
 
     if (io) {

@@ -10,11 +10,11 @@ const FAILED_ATTEMPTS_LIMIT = 5;
 const SPECK_ROUNDS = 34;
 
 function rol64(x, r) {
-  return ((x << r) | (x >> (64n - r))) & 0xFFFFFFFFFFFFFFFFn;
+  return ((x << r) | (x >> (64n - r)));
 }
 
 function ror64(x, r) {
-  return ((x >> r) | (x << (64n - r))) & 0xFFFFFFFFFFFFFFFFn;
+  return ((x >> r) | (x << (64n - r)));
 }
 
 function speckKeySchedule(key) {
@@ -372,12 +372,16 @@ function logProductVerification(licenseId, ip, success) {
 async function changePassword(userId, oldPassword, newPassword) {
   const user = getUserById(userId);
   if (!user) return { success: false, error: 'User not found' };
-  
+
+  const sanitizedOldPassword = validate.sanitizePassword(oldPassword);  
+
   const userWithHash = db.prepare(`SELECT password_hash FROM users WHERE id = ?`).get(userId);
-  const valid = await bcrypt.compare(oldPassword, userWithHash.password_hash);
+  const valid = await bcrypt.compare(sanitizedOldPassword, userWithHash.password_hash);
   if (!valid) return { success: false, error: 'Invalid password' };
   
-  const newHash = await bcrypt.hash(newPassword, 10);
+  const sanitizedPassword = validate.sanitizePassword(newPassword);
+
+  const newHash = await bcrypt.hash(sanitizedPassword, 10);
   db.prepare(`UPDATE users SET password_hash = ? WHERE id = ?`).run(newHash, userId);
   return { success: true };
 }
@@ -386,12 +390,17 @@ async function deleteAccount(userId, password) {
   const userWithHash = db.prepare(`SELECT password_hash FROM users WHERE id = ?`).get(userId);
   const valid = await bcrypt.compare(password, userWithHash.password_hash);
   if (!valid) return { success: false, error: 'Invalid password' };
-  
-  db.prepare(`DELETE FROM transactions WHERE user_id = ?`).run(userId);
-  db.prepare(`DELETE FROM licenses WHERE user_id = ?`).run(userId);
-  db.prepare(`DELETE FROM sessions WHERE user_id = ?`).run(userId);
-  db.prepare(`DELETE FROM users WHERE id = ?`).run(userId);
-  
+  const deleteUser = db.transaction(() => {
+    db.prepare(`DELETE FROM transactions WHERE user_id = ?`).run(userId);
+    db.prepare(`DELETE FROM licenses WHERE user_id = ?`).run(userId);
+    db.prepare(`DELETE FROM sessions WHERE user_id = ?`).run(userId);
+    db.prepare(`DELETE FROM users WHERE id = ?`).run(userId);
+    return { success: true };
+  });
+  const result = deleteUser();
+  if (!result || !result.success) {
+    return { success: false, error: 'Error deleting account' };
+  }
   return { success: true };
 }
 
