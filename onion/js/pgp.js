@@ -2,9 +2,9 @@ const fs = require('fs');
 const path = require('path');
 const openpgp = require('openpgp');
 
-const PGP_KEY_PATH = 'keys/obsidiantest.asc';
+const PGP_KEY_PATH = '/srv/keys/obsidian.asc';
 
-const PGP_KEY_PASSPHRASE = '12341234';
+const PGP_KEY_PASSPHRASE = process.env.PGP_KEY_PASSPHRASE;
 
 let privateKey = null;
 let privateKey_import = null;
