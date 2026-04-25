@@ -3,7 +3,7 @@ const path = require('path');
 const crypto = require('crypto');
 const fs = require('fs');
 
-const dbPath = 'data/tor.db';
+const dbPath = '/srv/db/obsidian.db';
 let dbKey = process.env.DATABASE_KEY;
 
 if (!fs.existsSync(dbPath)) {
