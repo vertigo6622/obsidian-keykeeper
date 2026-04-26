@@ -1,3 +1,6 @@
+const IS_I2P = window.location.hostname.endsWith('.i2p');
+const BACKEND_URL = IS_I2P ? 'http://obsidian.i2p' : 'https://obsidian.st';
+
 let socket = null;
 let currentUser = null;
 let lastTabBeforeLicense = 'tab-purchase';
@@ -71,7 +74,7 @@ function connectToBackend() {
 
   setConnectionState(ConnectionState.CONNECTING);
 
-  socket = io('https://obsidian.st');  
+  socket = io(BACKEND_URL, IS_I2P ? { transports: ['polling'] } : {});
 
   socket.on('connect_error', (err) => {
     console.error('Connection error:', err);
@@ -325,7 +328,7 @@ function requestDownload(e) {
       alert(data.error);
       return;
     }
-    window.location = 'https://obsidian.st/keykeeper/product/create?token=' + data.token;
+    window.location = BACKEND_URL + '/keykeeper/product/create?token=' + data.token;
   });
 }
 
