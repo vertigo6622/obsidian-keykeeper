@@ -3,12 +3,10 @@ const statusDb = require('./database.status');
 const fetch = global.fetch || require('node-fetch');
 const https = require('https');
 const { SocksProxyAgent } = require('socks-proxy-agent');
-const helmet = require('helmet');
 
 const app = express();
 app.disable('x-powered-by');
 app.disable('etag');
-app.use(helmet());
 
 const TOR_SOCKS = 'socks5h://127.0.0.1:9050';
 const torAgent = new SocksProxyAgent(TOR_SOCKS);
@@ -24,9 +22,8 @@ let torUp = false;
 
 app.get('/', (req, res) => {
   const latest = statusDb.getLatestStatus();
-  const weekly = statusDb.getWeeklyStatus();
   const stats = statusDb.getUptimeStats();
-  res.json({ current: latest, weekly, stats, tor_status: torUp ? 'up' : 'down' });
+  res.json({ current: latest, stats, tor_status: torUp ? 'up' : 'down' });
 });
 
 async function checkTor() {
