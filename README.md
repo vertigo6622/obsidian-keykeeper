@@ -11,7 +11,7 @@
 
 a cryptocurrency-based software licensing and digital rights management platform built with privacy-first principles. users can purchase software licenses using monero (xmr) or litecoin (ltc), with licenses bound to hardware ids for copy-protection. it is the backend of the obsidian pro and commerical licensing, but can be adapted for any application that requires securely handling licensing and drm.
 
-security features include: tor-over-clearnet backend, and a site pgp key with pgp signed ltc and xmr addresses to protect from phishing. users are identified with an account number. keykeeper does not support email sign-up at this time. this way, licensing protections can be upheld without collecting excessive user data. there are also automatic suspensions for any detected tampering with the licensing code using cryptographically secure SPECK-CBC-MAC hashes which prevent spoofing. 
+security features include: tor-over-clearnet backend, recently configured to also work tor-over-clearnet-over-i2p, and a site pgp key with pgp signed ltc and xmr addresses to protect from phishing. users are identified with an account number. keykeeper does not support email sign-up at this time. this way, licensing protections can be upheld without collecting excessive user data. there are also automatic suspensions for any detected tampering with the licensing code using cryptographically secure SPECK-CBC-MAC hashes which prevent spoofing. 
 
 this model requires that the stub (the small section of code that executes the obsidian-packed payload) contact keykeeper first, in order to acquire the decryption key for the obsidian pro/commerical product. this happens through the clearnet proxy, redirecting them through tor to the keykeeper server. 
 
@@ -19,14 +19,6 @@ the server receives both the stubs calculated hash as well as the components tha
 
 ---
 ## features
-
-- **license types (configurable):**
-  - **pro license**: 6-month subscription for individual users
-  - **commercial license**: 6-month subscription for commercial use
-
-- **payment options:**
-  - monero (xmr)
-  - litecoin (ltc)
 
 - **security and privacy:**
   - pgp-signed payment address
@@ -43,6 +35,11 @@ the server receives both the stubs calculated hash as well as the components tha
   - increases privacy and security of the backend
   - doesn't require tor browser
 
+- **tor-over-clearnet-over-i2p:**
+  - website accessible over i2p
+  - websockets over i2p fully functional
+  - wireguard protects inter-server communication
+
 - **admin shell:**
   - local-only admin ipc shell
   - directly manipulate the database
@@ -57,6 +54,14 @@ the server receives both the stubs calculated hash as well as the components tha
   - license relinking for hardware changes (max 3 times)
   - per-user SPECK encryption keys
   - takes 2-5 seconds on average round trip + computation
+ 
+- **license types (configurable):**
+  - **pro license**: 6-month subscription for individual users
+  - **commercial license**: 6-month subscription for commercial use
+
+- **payment options:**
+  - monero (xmr)
+  - litecoin (ltc)
 
 ---
 ## keykeeper architecture
