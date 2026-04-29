@@ -94,11 +94,12 @@ the server receives both the stubs calculated hash as well as the components tha
                      │  admin      │────►│  backend    │◄────│  tor        │◄───┘ │
                      │ ipc shell   │  ┌─►│ (node.js)   │────►│ rendezvous  │──────┘
                      └─────────────┘  │  └──────▲──────┘     └─────────────┘
-                            ┌─────────┘    ┌────┼────────────────────┐
+                            ┌─────────┘    ┌────┴───────┬────────────┐
                      ┌──────▼──────┐  ┌────▼────┐  ┌────▼────┐  ┌────▼────┐
-                     │ obsidian    │  │ sqlite  │  │ monero  │  │litecoin │
-                     │ onion site  │  │database │  │  wallet │  │ wallet  │
-                     └─────────────┘  └─────────┘  └─────────┘  └─────────┘
+                     │ obsidian    │◄─│ sqlite  │  │ monero  │  │litecoin │
+                     │ onion site  │─►│database │  │  wallet │  │ wallet  │
+                     └──────▲──────┘  └─────────┘  └────▲────┘  └────▲────┘
+                            └───────────────────────────┴────────────┘
 ```
 
 **socket.io websockets:**
