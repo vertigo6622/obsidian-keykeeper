@@ -82,7 +82,7 @@ the server receives both the stubs calculated hash as well as the components tha
  │ client      │◄────│ obsidian    │◄──│ sqlite  │  │ monero  │  │litecoin │
  │(tor browser)│────►│ onion site  │──►│database │  │  wallet │  │ wallet  │
  └─────────────┘     └──────▲──────┘   └─────────┘  └────▲────┘  └────▲────┘
-                            └───────────────────────────┴────────────┘
+                            └────────────────────────────┴────────────┘
 ```
 
 ## clearnet architecture
