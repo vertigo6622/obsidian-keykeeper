@@ -64,23 +64,6 @@ the server receives both the stubs calculated hash as well as the components tha
   - litecoin (ltc)
 
 ---
-## keykeeper architecture
-
-```  
-  ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
-  │  client     │◄────│   nginx     │◄────│  proxy      │◄─────┐
-  │  (browser)  │────►│(port 443/80)│────►│ (port 8888) │────┐ │      
-  └─────────────┘     └─────────────┘     └─────────────┘    │ │ tor 
-  ┌─────────────┐     ┌─────────────┐     ┌─────────────┐    │ │ circuit
-  │  admin      │────►│  backend    │◄────│  tor        │◄───┘ │
-  │ ipc shell   │     │ (node.js)   │────►│ rendezvous  │──────┘
-  └─────────────┘     └──────▲──────┘     └─────────────┘
-                ┌────────────┼────────────┐          
-           ┌────▼────┐  ┌────▼────┐  ┌────▼────┐
-           │ sqlite  │  │ monero  │  │litecoin │
-           │database │  │  wallet │  │ wallet  │
-           └─────────┘  └─────────┘  └─────────┘
-```
 
 ## tor-over-clearnet-over-i2p architecture
 
@@ -100,6 +83,24 @@ the server receives both the stubs calculated hash as well as the components tha
                      │ onion site  │─►│database │  │  wallet │  │ wallet  │
                      └──────▲──────┘  └─────────┘  └────▲────┘  └────▲────┘
                             └───────────────────────────┴────────────┘
+```
+
+## clearnet architecture
+
+```  
+  ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
+  │  client     │◄────│   nginx     │◄────│  proxy      │◄─────┐
+  │  (browser)  │────►│(port 443/80)│────►│ (port 8888) │────┐ │      
+  └─────────────┘     └─────────────┘     └─────────────┘    │ │ tor 
+  ┌─────────────┐     ┌─────────────┐     ┌─────────────┐    │ │ circuit
+  │  admin      │────►│  backend    │◄────│  tor        │◄───┘ │
+  │ ipc shell   │     │ (node.js)   │────►│ rendezvous  │──────┘
+  └─────────────┘     └──────▲──────┘     └─────────────┘
+                ┌────────────┼────────────┐          
+           ┌────▼────┐  ┌────▼────┐  ┌────▼────┐
+           │ sqlite  │  │ monero  │  │litecoin │
+           │database │  │  wallet │  │ wallet  │
+           └─────────┘  └─────────┘  └─────────┘
 ```
 
 **socket.io websockets:**
