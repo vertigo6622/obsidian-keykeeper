@@ -18,6 +18,29 @@ this model requires that the stub (the small section of code that executes the o
 the server receives both the stubs calculated hash as well as the components that make up the hash. it then calculates the hash independently and compares across three domains: database hardware id, server-calculated hardware id, and the stubs returned hardware id. any mismatch and the server will refuse to issue the key.
 
 ---
+
+## tor-over-clearnet-over-i2p architecture
+
+
+```  
+ ┌─────────────┐     ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
+ │ i2p client  │◄────│  i2p p2p    │◄────│   nginx     │◄────│  proxy      │◄─────┐
+ │  browser    │────►│  network    │────►│(port 443/80)│────►│ (port 8888) │────┐ │      
+ └─────────────┘     └─────────────┘     └─────────────┘     └─────────────┘    │ │ tor 
+                     ┌─────────────┐     ┌─────────────┐     ┌─────────────┐    │ │ circuit
+                     │  admin      │────►│  backend    │◄────│  tor        │◄───┘ │
+                     │ ipc shell   │ ┌──►│ (node.js)   │────►│ rendezvous  │──────┘
+                     └─────────────┘ │   └──────▲──────┘     └─────────────┘
+                            ┌────────┘      ┌───┴────────┬────────────┐
+ ┌─────────────┐ tor ┌──────▼──────┐   ┌────▼────┐  ┌────▼────┐  ┌────▼────┐
+ │ client      │◄────│ obsidian    │◄──│ sqlite  │  │ monero  │  │litecoin │
+ │(tor browser)│────►│ onion site  │──►│database │  │  wallet │  │ wallet  │
+ └─────────────┘     └──────▲──────┘   └─────────┘  └────▲────┘  └────▲────┘
+                            └────────────────────────────┴────────────┘
+```
+
+---
+
 ## features
 
 - **security and privacy:**
@@ -64,26 +87,6 @@ the server receives both the stubs calculated hash as well as the components tha
   - litecoin (ltc)
 
 ---
-
-## tor-over-clearnet-over-i2p architecture
-
-
-```  
- ┌─────────────┐     ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
- │ i2p client  │◄────│  i2p p2p    │◄────│   nginx     │◄────│  proxy      │◄─────┐
- │  browser    │────►│  network    │────►│(port 443/80)│────►│ (port 8888) │────┐ │      
- └─────────────┘     └─────────────┘     └─────────────┘     └─────────────┘    │ │ tor 
-                     ┌─────────────┐     ┌─────────────┐     ┌─────────────┐    │ │ circuit
-                     │  admin      │────►│  backend    │◄────│  tor        │◄───┘ │
-                     │ ipc shell   │ ┌──►│ (node.js)   │────►│ rendezvous  │──────┘
-                     └─────────────┘ │   └──────▲──────┘     └─────────────┘
-                            ┌────────┘      ┌───┴────────┬────────────┐
- ┌─────────────┐ tor ┌──────▼──────┐   ┌────▼────┐  ┌────▼────┐  ┌────▼────┐
- │ client      │◄────│ obsidian    │◄──│ sqlite  │  │ monero  │  │litecoin │
- │(tor browser)│────►│ onion site  │──►│database │  │  wallet │  │ wallet  │
- └─────────────┘     └──────▲──────┘   └─────────┘  └────▲────┘  └────▲────┘
-                            └────────────────────────────┴────────────┘
-```
 
 ## clearnet architecture
 
