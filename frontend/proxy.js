@@ -2,13 +2,11 @@ const express = require('express');
 const http = require('http');
 const httpProxy = require('http-proxy');
 const { SocksProxyAgent } = require('socks-proxy-agent');
-const helmet = require('helmet');
 
 const app = express();
 
 app.disable('x-powered-by');
 app.disable('etag');
-app.use(helmet());
 
 const ONION_ADDRESS = process.env.ONION_ADDRESS;
 const ONION_PORT = parseInt(process.env.ONION_PORT || '3000');
