@@ -13,7 +13,6 @@ const wallet = require('./wallet');
 const packer = require('./packer-bridge');
 const pgp = require('./pgp')
 const adminIpc = require('./admin-ipc');
-const helmet = require('helmet');
 const db = require('./database');
 
 const app = express();
@@ -22,33 +21,6 @@ app.disable('x-powered-by');
 app.disable('etag');
 app.set('trust proxy', 1);
 app.set('query parser', 'simple');
-
-const cspDirectives = {
-  defaultSrc: ["'self'"],
-  styleSrc: ["'self'", "'unsafe-inline'"],
-  scriptSrc: ["'self'"],
-  imgSrc: ["'self'", "data:"],
-  connectSrc: ["'self'", "ws:", "wss:"],
-  fontSrc: ["'self'"],
-  objectSrc: ["'none'"],
-  mediaSrc: ["'self'"],
-  frameSrc: ["'none'"],
-  baseUri: ["'self'"],
-  formAction: ["'self'"]
-};
-
-cspDirectives.upgradeInsecureRequests = [];
-
-app.use(helmet({
-  contentSecurityPolicy: {
-    directives: cspDirectives
-  },
-  hsts: {
-    maxAge: 31536000,
-    includeSubDomains: true,
-    preload: true
-  }
-}));
 
 const server = http.createServer(app);
 
