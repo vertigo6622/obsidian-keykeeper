@@ -23,16 +23,16 @@ fs.mkdirSync(logDir, { recursive: true });
 
 const accessLogStream = rfs.createStream('access.log', {
   path: logDir,
-  size: '10M',
-  interval: '1d',
-  compress: 'gzip'
+  interval: '30d',
+  compress: 'gzip',
+  maxFiles: 6
 });
 
 const errorLogStream = rfs.createStream('error.log', {
   path: logDir,
-  size: '10M',
-  interval: '1d',
-  compress: 'gzip'
+  interval: '30d',
+  compress: 'gzip',
+  maxFiles: 6
 });
 
 const app = express();
