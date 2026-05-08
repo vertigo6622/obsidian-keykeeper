@@ -38,7 +38,6 @@ let i2pUp = true;
 let onionUp = true;
 let torNodeInfo = { up: true };
 
-
 app.get('/', (req, res) => {
   const latest = statusDb.getLatestStatus();
   const stats = statusDb.getUptimeStats();
@@ -74,10 +73,10 @@ async function checkTor() {
 async function checkI2P() {
   return new Promise((resolve) => {
     const req = http.request({
-      host: I2P_PROXY,
-      port: I2P_PROXY_PORT,
+      host: '10.0.0.1',
+      port: '7657',
       method: 'GET',
-      path: 'http://zzz.i2p/',
+      path: '/i2ptunnelmgr',
       timeout: I2P_TIMEOUT
     }, (res) => {
       resolve(res.statusCode >= 200 && res.statusCode < 500);
